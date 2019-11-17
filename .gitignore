@@ -1,0 +1,11 @@
+*.1
+*.a
+*.bin
+*.dll
+*.exe
+*.o
+*.so
+*.tgz
+*.txt
+httpc
+install/*

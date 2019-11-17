@@ -1,0 +1,57 @@
+/* Project: Embeddable HTTP 1.0/1.1 Client 
+ * Author:  Richard James Howe
+ * License: The Unlicense
+ * Email:   howe.r.j.89@gmail.com */
+#ifndef HTTPC_H
+#define HTTPC_H
+
+#include <stddef.h>
+#include <stdarg.h>
+
+#ifndef HTTPC_API
+#define HTTPC_API /* Used to apply attributes to exported functions */
+#endif
+
+#ifndef ALLOCATOR_FN
+#define ALLOCATOR_FN
+typedef void *(*allocator_fn)(void *arena, void *ptr, size_t oldsz, size_t newsz);
+#endif
+
+typedef struct {
+	allocator_fn allocator;
+
+	int (*open)(void **socket, void *opts, const char *domain, unsigned short port, int use_ssl);
+	int (*close)(void *socket);
+	int (*read)(void *socket, unsigned char *buf, size_t *length);
+	int (*write)(void *socket, const unsigned char *buf, size_t length);
+	int (*sleep)(unsigned long milliseconds);
+	int (*logger)(void *file, const char *fmt, va_list ap);
+
+	void *arena       /* passed to allocator */, 
+	     *logfile,    /* passed to logger */
+	     *socketopts; /* passed to open */
+} httpc_os_t;
+
+enum { HTTPC_ERROR = -1, HTTPC_OK = 0, HTTPC_BLOCKED = 1 };
+
+typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, size_t position);
+
+struct httpc;
+typedef struct httpc httpc_t;
+
+/* all functions: return negative on failure, zero or positive on success */
+HTTPC_API int httpc_version(unsigned long *version); /* version in x.y.z format, z = LSB, MSB = compilation options */
+HTTPC_API int httpc_get(const char *url, httpc_os_t *a, httpc_callback fn, void *param);
+HTTPC_API int httpc_put(const char *url, httpc_os_t *a, httpc_callback fn, void *param);
+HTTPC_API int httpc_tests(httpc_os_t *a);
+
+/* you provide these functions and populate 'httpc_os_t' with them - return
+ * negative on failure, zero on success. */
+HTTPC_API extern int httpc_open(void **socket, void *socketopts, const char *domain, unsigned short port, int use_ssl);
+HTTPC_API extern int httpc_close(void *socket);
+HTTPC_API extern int httpc_read(void *socket, unsigned char *buf, size_t *length);
+HTTPC_API extern int httpc_write(void *socket, const unsigned char *buf, size_t length);
+HTTPC_API extern int httpc_sleep(unsigned long milliseconds);
+HTTPC_API extern int httpc_logger(void *logfile, const char *fmt, va_list ap);
+
+#endif
