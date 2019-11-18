@@ -46,13 +46,9 @@ int httpc_logger(void *logger, const char *fmt, va_list ap) {
 	FILE *f = logger;
 	va_list copy;
 	va_copy(copy, ap);
-	const int r1 = vfprintf(f, fmt, copy);
+	const int r = vfprintf(f, fmt, copy);
 	va_end(copy);
-	const int r2 = fputc('\n', f);
-	const int r3 = fflush(f);
-	if (r1 < 0 || r2 < 0 || r3 < 0)
-		return HTTPC_ERROR;
-	return r1 + 1;
+	return r;
 }
 
 /* TODO: Add keepalive, timeout, ... */

@@ -98,7 +98,7 @@ static void *httpc_allocator(void *arena, void *ptr, const size_t oldsz, const s
  * discarding everything until we get back to where we are. Also bear in mind
  * even if "position < d->position", "position + length" could be greater than 
  * "d->position". */
-static int httpc_dump(void *param, unsigned char *buf, size_t length, size_t position) {
+static int httpc_dump_cb(void *param, unsigned char *buf, size_t length, size_t position) {
 	assert(param);
 	assert(buf);
 	httpc_dump_t *d = param;
@@ -109,6 +109,18 @@ static int httpc_dump(void *param, unsigned char *buf, size_t length, size_t pos
 	fwrite(buf, 1, length, stdout); 
 	/* TODO: Keep track of position */
 	return HTTPC_OK;
+}
+
+static int httpc_put_cb(void *param, unsigned char *buf, size_t length, size_t position) {
+	assert(param);
+	UNUSED(position);
+	FILE *in = param;
+	if (length == 0)
+		return HTTPC_ERROR;
+	const size_t l = fread(buf, 1, length, in);
+	if (l < length)
+		return ferror(in) ? HTTPC_ERROR : (int)l;
+	return l;
 }
 
 static int help(FILE *out, const char *arg0) {
@@ -132,13 +144,32 @@ Repository: <https://github.com/howerj/httpc>\n\
 Version:    %d.%d.%d\n\
 Flags:      %d\n\n\
 Options:\n\n\
+\t-o #\tset operation GET/HEAD/PUT/DELETE\n\
 \t-h\tprint help and exit\n\
 \t-t\trun the built in tests, returning failure status\n\
 \t-u URL\tset URL to use\n\
 \tURL\tset URL to use\n\
 \n\
-Returns non zero value on failure.\n\n";
+Returns non zero value on failure. stdin(3) for input, stdout(3)\n\
+for output, and stderr(3) for logging\n\n";
 	return fprintf(out, fmt, arg0, x, y, z, q);
+}
+
+enum { GET, HEAD, PUT, POST, DELETE };
+
+static int operation(const char *s) {
+	assert(s);
+	if (!strcmp(s, "GET"))
+		return GET;
+	if (!strcmp(s, "HEAD"))
+		return HEAD;
+	if (!strcmp(s, "PUT"))
+		return PUT;
+	if (!strcmp(s, "POST"))
+		return POST;
+	if (!strcmp(s, "DELETE"))
+		return DELETE;
+	return -1;
 }
 
 int main(int argc, char **argv) {
@@ -155,11 +186,12 @@ int main(int argc, char **argv) {
 		.logfile    = stderr,
 	};
 
-	int ch = 0;
+	int ch = 0, op = GET;
 	const char *url = NULL;
 	httpc_getopt_t opt = { .init = 0 };
-	while ((ch = httpc_getopt(&opt, argc, argv, "htu:")) != -1) {
+	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:")) != -1) {
 		switch (ch) {
+		case 'o': op = operation(opt.arg); break;
 		case 'h': return help(stderr, argv[0]), 0;
 		case 't': return -httpc_tests(&a);
 		case 'u': url = opt.arg; break;
@@ -173,8 +205,16 @@ int main(int argc, char **argv) {
 		url = argv[opt.index++];
 	}
 	httpc_dump_t d = { .position = 0 };
-	if (httpc_get(url, &a, httpc_dump, &d) != HTTPC_OK)
+	switch (op) {
+	case GET:    return httpc_get(&a, url, httpc_dump_cb, &d) != HTTPC_OK ? 1 : 0;
+	case HEAD:   return httpc_head(&a, url) != HTTPC_OK ? 1 : 0;
+	case PUT:    return httpc_put(&a, url, httpc_put_cb, stdin) != HTTPC_OK ? 1 : 0;
+	case DELETE: return httpc_delete(&a, url) != HTTPC_OK ? 1 : 0; 
+	case POST: 
+	default:
+		fprintf(stderr, "operation unimplemented\n");
 		return 1;
+	}
 	return 0;
 }
 

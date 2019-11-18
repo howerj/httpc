@@ -1,4 +1,4 @@
-VERSION=0x000001ul
+VERSION=0x000002ul
 # TODO -std=gnu99 should only be applied to 'unix.c', -std=c99 should be used elsewhere
 CFLAGS=-Wall -Wextra -fPIC -std=gnu99 -O2 -pedantic -g -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="${VERSION}"
 TARGET=httpc

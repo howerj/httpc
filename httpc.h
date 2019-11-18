@@ -41,8 +41,11 @@ typedef struct httpc httpc_t;
 
 /* all functions: return negative on failure, zero or positive on success */
 HTTPC_API int httpc_version(unsigned long *version); /* version in x.y.z format, z = LSB, MSB = compilation options */
-HTTPC_API int httpc_get(const char *url, httpc_os_t *a, httpc_callback fn, void *param);
-HTTPC_API int httpc_put(const char *url, httpc_os_t *a, httpc_callback fn, void *param);
+HTTPC_API int httpc_get(httpc_os_t *a, const char *url, httpc_callback fn, void *param);
+HTTPC_API int httpc_put(httpc_os_t *a, const char *url, httpc_callback fn, void *param); /* fn should return size, 0 on stop, -1 on failure */
+HTTPC_API int httpc_get_buffer(httpc_os_t *a, const char *url, char *buffer, size_t length); /* store GET to buffer */
+HTTPC_API int httpc_head(httpc_os_t *a, const char *url);
+HTTPC_API int httpc_delete(httpc_os_t *a, const char *url);
 HTTPC_API int httpc_tests(httpc_os_t *a);
 
 /* you provide these functions and populate 'httpc_os_t' with them - return
