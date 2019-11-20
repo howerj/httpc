@@ -47,7 +47,6 @@ int httpc_open(void **sock, void *opts, const char *host_or_ip, unsigned short p
 	};
 
 	if (use_ssl) {
-		//(void)httpc_log("SSL not implemented yet");
 		return HTTPC_ERROR;
 	}
 

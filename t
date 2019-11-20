@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # HTTPC: HTTP Client Test Suite
 # Tests go here!
@@ -13,9 +13,39 @@ set -u
 make httpc
 ./httpc -t
 
-${NC} -l -p 8080 < ex1.txt &
+EX1=$(cat <<'EOF'
+HTTP/1.1 200 OK 
+Content-Type: text/plain 
+Transfer-Encoding: chunked
+
+7
+Mozilla
+9
+Developer
+7
+Network
+4
+Wiki
+5
+pedia
+E
+ in
+
+chunks.
+0
+EOF 
+)
+
+EX2=$(cat <<'EOF'
+HTTP/1.1 301 Moved Permanently
+Location: 127.0.0.1:8080
+
+EOF
+);
+
+echo "${EX1}" | unix2dos | ${NC} -l -p 8080 &
 p1=$!
-${NC} -l -p 8081 < ex2.txt &
+echo "${EX2}" | unix2dos | "${NC}" -l -p 8081 < ex2.txt &
 p2=$!
 
 ./httpc "${LOCAL}:8081"

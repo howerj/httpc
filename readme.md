@@ -86,6 +86,7 @@ Known issues include:
 
 * A line in the HTTP header must be smaller than 512 bytes in size (with the
   default configuration) otherwise parsing the header will fail.
+* File sizes are probably limited up to 2GiB on many platforms.
 * The project is currently in alpha, there are likely to be many problems and
   things not implemented.
 
@@ -123,6 +124,13 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
    - Allowing Unix line termination to be used instead of the proper line
      termination, but still accepting both.
    - By making all comparisons on text fields case insensitive (ASCII only).
+* [ ] Perform optimizations on code
+  - [ ] Reduce number of logging format strings
+  - [ ] Allocate small buffers on the stack, then move to heap if needed
+    amount becomes too big.
+* [ ] Add more assertions
+  - Pre and post conditions
+  - Assert buffer indices within bounds
 * [ ] Implement a subset of the [cURL][] command line options such
   as '-X', and more. Using a structure like this:
 
