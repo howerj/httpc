@@ -1,12 +1,11 @@
 VERSION=0x000002ul
-# TODO -std=gnu99 should only be applied to 'unix.c', -std=c99 should be used elsewhere
-CFLAGS=-Wall -Wextra -fPIC -std=gnu99 -O2 -pedantic -g -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="${VERSION}"
+STD=c99
+CFLAGS=-Wall -Wextra -fPIC -std=${STD} -O2 -pedantic -g -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="${VERSION}"
 TARGET=httpc
 AR      = ar
 ARFLAGS = rcs
 DESTDIR = install
 
-# TODO: Try to make this portable instead?
 ifeq ($(OS),Windows_NT)
 DLL=dll
 PLATFORM=win
@@ -27,7 +26,10 @@ main.o: main.c ${TARGET}.h
 
 ${TARGET}.o: ${TARGET}.c ${TARGET}.h
 
-${PLATFORM}.o: ${PLATFORM}.c ${TARGET}.h
+win.o:  win.c ${TARGET}.h
+
+unix.o: STD=gnu99
+unix.o: unix.c ${TARGET}.h
 
 lib${TARGET}.a: ${TARGET}.o ${PLATFORM}.o ${TARGET}.h
 	${AR} ${ARFLAGS} $@ ${TARGET}.o ${PLATFORM}.o

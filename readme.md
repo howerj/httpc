@@ -85,7 +85,7 @@ pretty much every Unix program ever.
 Known issues include:
 
 * A line in the HTTP header must be smaller than 512 bytes in size (with the
-  default configuration) otherwise the parsing the header will fail.
+  default configuration) otherwise parsing the header will fail.
 * The project is currently in alpha, there are likely to be many problems and
   things not implemented.
 
@@ -109,16 +109,12 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
   if a open, close, read or write on a socket would block. This is more
   difficult that it first seems. Perhaps the line number could be used as
   a way of storing state...
-* [x] Handle redirects
 * [ ] Try to remove any arbitrary limitations on the program
 * [ ] Come up with a decent test suite, perhaps by using [netcat][].
   - Create a module that will allow the connection to be broken at
   arbitrary points.
   - Come up with a series of test files to be fed to netcat.
 * [ ] Add a HTTPS version of the open/close functions
-* [ ] Make an 'empty' branch
-* [ ] Implement a subset of the [cURL][] command line options such
-  as '-X', and more.
 * This project could be extended to support other, small, Internet related
   protocols that are useful in an embedded context and are also simple to
   implement, such as [ntp][] and [dns][] clients.
@@ -127,7 +123,8 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
    - Allowing Unix line termination to be used instead of the proper line
      termination, but still accepting both.
    - By making all comparisons on text fields case insensitive (ASCII only).
-* Implement a way to customize the HTTP request
+* [ ] Implement a subset of the [cURL][] command line options such
+  as '-X', and more. Using a structure like this:
 
 	struct options {
 		int argc;

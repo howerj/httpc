@@ -8,6 +8,7 @@
 
 typedef struct {
 	size_t position;
+	FILE *output;
 } httpc_dump_t;
 
 typedef struct {
@@ -19,6 +20,15 @@ typedef struct {
 	char *place; /* internal use: scanner position */
 	int  init;   /* internal use: initialized or not */
 } httpc_getopt_t;    /* getopt clone; with a few modifications */
+
+#ifdef _WIN32 /* Used to unfuck file mode for "Win"dows. Text mode is for losers. */
+#include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+static void binary(FILE *f) { _setmode(_fileno(f), _O_BINARY); } /* only platform specific code... */
+#else
+static inline void binary(FILE *f) { UNUSED(f); }
+#endif
 
 /* Adapted from: <https://stackoverflow.com/questions/10404448> */
 static int httpc_getopt(httpc_getopt_t *opt, const int argc, char *const argv[], const char *fmt) {
@@ -106,8 +116,8 @@ static int httpc_dump_cb(void *param, unsigned char *buf, size_t length, size_t 
 	if (l < position)
 		return HTTPC_ERROR;
 	d->position = position + length;
-	fwrite(buf, 1, length, stdout); 
-	/* TODO: Keep track of position */
+	if (fwrite(buf, 1, length, d->output) != length)
+		return HTTPC_ERROR;
 	return HTTPC_OK;
 }
 
@@ -173,6 +183,12 @@ static int operation(const char *s) {
 }
 
 int main(int argc, char **argv) {
+
+
+	binary(stdin);
+	binary(stdout);
+	binary(stderr);
+
 	httpc_os_t a = {
 		.allocator  = httpc_allocator,
 		.open       = httpc_open,
@@ -204,7 +220,7 @@ int main(int argc, char **argv) {
 		}
 		url = argv[opt.index++];
 	}
-	httpc_dump_t d = { .position = 0 };
+	httpc_dump_t d = { .position = 0, .output = stdout };
 	switch (op) {
 	case GET:    return httpc_get(&a, url, httpc_dump_cb, &d) != HTTPC_OK ? 1 : 0;
 	case HEAD:   return httpc_head(&a, url) != HTTPC_OK ? 1 : 0;

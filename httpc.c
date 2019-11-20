@@ -11,6 +11,7 @@
 #include <stdio.h> /* file operations not used, but sscanf is */
 #include <stdint.h>
 #include <ctype.h>
+#include <limits.h>
 
 #ifndef HTTPC_STACK_BUFFER_SIZE /* buffers allocated on the stack, responsible for some arbitrary limits as well. */
 #define HTTPC_STACK_BUFFER_SIZE (512ul)
@@ -57,6 +58,8 @@ struct httpc {
 	httpc_os_t os;
 	httpc_callback fn;
 	void *fn_param;
+	int argc;    /* extra headers count */
+	char **argv; /* extra headers, can be NULL if argc == 0 */
 	/* These strings point into 'url', which has been modified from the
 	 * original URL to contain a bunch of NUL terminated strings where the
 	 * delimiters were */
@@ -67,10 +70,11 @@ struct httpc {
 	unsigned retries, redirects; /* retry count, redirect count */
 	unsigned response, v1, v2; /* HTTP response, HTTP version (1.0 or 1.1) */
 	unsigned short port;
-	unsigned use_ssl  :1, /* if set then SSL should be used on the connection */
-		 fatal    :1, /* if set then something has gone fatally wrong */
-		 http1_0  :1, /* request HTTP 1.0 only, still can deal with HTTP 1.1 response however */
-		 identity :1; /* 1 == identity encoded, 0 == chunked */
+	unsigned use_ssl    :1, /* if set then SSL should be used on the connection */
+		 fatal      :1, /* if set then something has gone fatally wrong */
+		 http1_0    :1, /* request HTTP 1.0 only, still can deal with HTTP 1.1 response however */
+		 identity   :1, /* 1 == identity encoded, 0 == chunked */
+		 length_set :1; /* has length been set on a PUT/POST? */
 };
 
 /* Modified from: <https://stackoverflow.com/questions/342409>
@@ -109,6 +113,29 @@ static int base64_encode(const unsigned char *in, const size_t input_length, uns
 	out[encoded_length] = '\0';
 	*output_length = encoded_length;
 	return 0;
+}
+
+static inline void reverse(char * const r, const size_t length) {
+	const size_t last = length - 1;
+	for (size_t i = 0; i < length / 2ul; i++) {
+		const size_t t = r[i];
+		r[i] = r[last - i];
+		r[last - i] = t;
+	}
+}
+
+static unsigned num_to_str(char b[64], unsigned long u) {
+	unsigned i = 0;
+	do {
+		const unsigned long base = 10; /* bases 2-10 allowed */
+		const unsigned long q = u % base;
+		const unsigned long r = u / base;
+		b[i++] = q + '0';
+		u = r;
+	} while (u);
+	b[i] = '\0';
+	reverse(b, i);
+	return i;
 }
 
 int httpc_version(unsigned long *version) {
@@ -200,8 +227,6 @@ static int httpc_read_char(httpc_t *h) {
 	return x;
 }
 
-/* TODO: Get rid of this buffer interface / do small program optimization like
- * in pickle where small buffers are allocated on the stack */
 static int buffer_free(httpc_t *h, buffer_t *b) {
 	assert(h);
 	int r = HTTPC_OK;
@@ -407,14 +432,18 @@ static const char *op_to_str(int op) {
 	return r;
 }
 
-static int httpc_request_get_send(httpc_t *h, int op) {
+static int httpc_request_send_header(httpc_t *h, int op) {
 	assert(h);
+	implies(h->argc, h->argv);
 	if (httpc_dead(h))
 		return HTTPC_ERROR;
 	const char *operation = op_to_str(op);
 	if (!operation)
 		return fatal(h, "unknown operation '%d'", op);
-	buffer_t *b = buffer(h, 1024); /* TODO: Fix this */
+	/* NB. We could perform some small program optimization on this by
+	 * allocating on the stack then moving to heap when the size gets
+	 * too big. */
+	buffer_t *b = buffer(h, 1024);
 	if (!b)
 		return HTTPC_ERROR;
 
@@ -440,12 +469,17 @@ static int httpc_request_get_send(httpc_t *h, int op) {
 		if (buffer_add(h, b, range) < 0)
 			goto fail;
 	}
-	if (op == HTTPC_PUT || op == HTTPC_POST) { /* TODO: Send chunked if unknown length */
-		char content[96] = { 0 };
-		if (snprintf(content, sizeof content, "Content-Length: %lu\r\n", (unsigned long)h->length) < 0)
-			goto fail;
-		if (buffer_add(h, b, content) < 0)
-			goto fail;
+	if (op == HTTPC_PUT || op == HTTPC_POST) {
+		if (h->length_set) {
+			char content[96] = { 0 };
+			if (snprintf(content, sizeof content, "Content-Length: %lu\r\n", (unsigned long)h->length) < 0)
+				goto fail;
+			if (buffer_add(h, b, content) < 0)
+				goto fail;
+		} else { /* Attempt to send chunked encoding */
+			if (buffer_add(h, b, "Transfer-Encoding: chunked\r\n") < 0)
+				goto fail;
+		}
 	}
 
 	if (buffer_add(h, b, "Connection: Close\r\n") < 0)
@@ -468,17 +502,29 @@ static int httpc_request_get_send(httpc_t *h, int op) {
 			goto fail;
 	}
 
-	if (buffer_add(h, b, "\r\n") < 0)
-		goto fail;
-	info(h, "request {\n%s}", b->buffer);
 	if (h->os.write(h->socket, b->buffer, b->used - 1) < 0)
 		goto fail;
+	
+	for (int i = 0; i < h->argc; i++) {
+		const char *line = h->argv[i];
+		size_t l = 0;
+		for (l = 0; line[l]; l++)
+			if (line[l] == '\r' || line[l] == '\n')
+				return fatal(h, "invalid custom header field (illegal chars present)");
+		if (h->os.write(h->socket, (unsigned char *)line, l) < 0)
+			goto fail;
+		if (h->os.write(h->socket, (unsigned char *)"\r\n", 2) < 0)
+			goto fail;
+	}
 
+	if (h->os.write(h->socket, (unsigned char *)"\r\n", 2) < 0)
+		goto fail;
+
+	info(h, "%s request complete", operation);
 	return buffer_free(h, b);
 fail:
-	error(h, "send GET header failed");
 	(void)buffer_free(h, b);
-	return HTTPC_ERROR;
+	return error(h, "send GET header failed");
 }
 
 static int httpc_backoff(httpc_t *h) {
@@ -569,6 +615,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 				return HTTPC_ERROR;
 			}
 			info(h, "Content Length: %lu", (unsigned long)h->length);
+			h->length_set = 1;
 			return HTTPC_OK;
 		case FLD_REDIRECT:
 			if (h->response >= 300 && h->response < 399) {
@@ -639,6 +686,7 @@ static int httpc_parse_response_header(httpc_t *h) {
 	h->response = 0;
 	h->length = 0;
 	h->identity = 1;
+	h->length_set = 1;
 
 	length = sizeof line;
 	if (httpc_read_until_line_end(h, line, &length) < 0)
@@ -768,6 +816,7 @@ static int httpc_generate_request_body(httpc_t *h) {
 	int r = HTTPC_OK;
 	if (!(h->fn))
 		return info(h, "no callback - nothing to do");
+	int chunky = h->length_set == 0;
 	for (size_t pos = 0;;) {
 		unsigned char buf[HTTPC_STACK_BUFFER_SIZE];
 		r = h->fn(h->fn_param, buf, sizeof buf, pos);
@@ -778,13 +827,34 @@ static int httpc_generate_request_body(httpc_t *h) {
 			break;
 		}
 		pos += r;
+		if (chunky) {
+			char n[64];
+			assert(r < INT_MAX);
+			const unsigned l = num_to_str(n, r);
+			if (h->os.write(h->socket, (unsigned char*)n, l) < 0) {
+				r = error(h, "write failed");
+				break;
+			}
+		}
+
 		if (h->os.write(h->socket, buf, r) < 0) {
 			r = error(h, "write failed");
 			break;
 		}
+
+		if (chunky) {
+			if (h->os.write(h->socket, (unsigned char*)"\r\n", 2) < 0) {
+				r = error(h, "write failed");
+				break;
+			}
+		}
 	}
 	if (r < 0)
 		return error(h, "body generation failed");
+	if (chunky) {
+		if (h->os.write(h->socket, (unsigned char*)"0\r\n", 3) < 0)
+			return error(h, "write failed");
+	}
 	return info(h, "body generated");
 }
 
@@ -817,11 +887,7 @@ int httpc_op(httpc_os_t *a, const char *url, httpc_callback fn, void *param, int
 			return fatal(&h, "cannot continue quitting"); /* TODO minimize the number of error strings */
 		if (h.os.open(&h.socket, h.os.socketopts, h.domain, h.port, h.use_ssl) == HTTPC_OK) {
 			open = 1;
-			/* TODO: Handle PUT/DELETE/HEAD
-			 * - For PUT/POST it is Request-Generate Body-Parse Response
-			 * - For HEAD it is Request-Parse Response
-			 * - For DELETE it is Request-Parse Response */
-			if (httpc_request_get_send(&h, op) < 0)
+			if (httpc_request_send_header(&h, op) < 0)
 				goto backoff;
 			if (op == HTTPC_POST || op == HTTPC_PUT) {
 				if (httpc_generate_request_body(&h) < 0)
@@ -895,12 +961,32 @@ int httpc_get_buffer_cb(void *param, unsigned char *buf, size_t length, size_t p
 	return HTTPC_OK;
 }
 
+int httpc_put_buffer_cb(void *param, unsigned char *buf, size_t length, size_t position) {
+	assert(param);
+	assert(buf);
+	buffer_cb_t *b = param;
+	if (position > b->length)
+		return HTTPC_ERROR;
+	const size_t copy = MIN(length, b->length - position);
+	memcpy(buf, &b->buffer[position], copy);
+	assert(copy < INT_MAX);
+	return copy;
+}
+
 int httpc_get_buffer(httpc_os_t *a, const char *url, char *buffer, size_t length) {
 	assert(url);
 	assert(a);
 	assert(buffer);
 	buffer_cb_t param = { .buffer = buffer, .length = length };
 	return httpc_get(a, url, httpc_get_buffer_cb, &param);
+}
+
+int httpc_put_buffer(httpc_os_t *a, const char *url, char *buffer, size_t length) {
+	assert(url);
+	assert(a);
+	assert(buffer);
+	buffer_cb_t param = { .buffer = buffer, .length = length };
+	return httpc_put(a, url, httpc_put_buffer_cb, &param);
 }
 
 /* TODO: We could do a series of tests by replacing the callbacks with 
@@ -924,6 +1010,8 @@ int httpc_tests(httpc_os_t *a) {
 
 	static const url_tests_t ut[] = {
 		{ .url = "example.com",                                  .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 80,  .use_ssl = 0 },
+		{ .url = "user:password@example.com",                    .domain = "example.com", .userpass = "user:password", .path = "/",           .port = 80,  .use_ssl = 0 },
+		{ .url = "user:password@example.com:666",                .domain = "example.com", .userpass = "user:password", .path = "/",           .port = 666, .use_ssl = 0 },
 		{ .url = "http://example.com",                           .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 80,  .use_ssl = 0 },
 		{ .url = "https://example.com",                          .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 443, .use_ssl = 1 },
 		{ .url = "https://example.com:666",                      .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 666, .use_ssl = 1 },
