@@ -885,7 +885,7 @@ static int httpc_generate_request_body(httpc_t *h) {
 		}
 		pos += r;
 		if (chunky) {
-			char n[64];
+			char n[64 + 1];
 			assert(r < INT_MAX);
 			const unsigned l = num_to_str(n, r, 16);
 			if (h->os.write(h->socket, (unsigned char*)n, l) < 0) {

@@ -165,20 +165,20 @@ for output, and stderr(3) for logging\n\n";
 	return fprintf(out, fmt, arg0, x, y, z, q);
 }
 
-enum { GET, HEAD, PUT, POST, DELETE };
+enum { OP_GET, OP_HEAD, OP_PUT, OP_POST, OP_DELETE };
 
 static int operation(const char *s) {
 	assert(s);
 	if (!strcmp(s, "GET"))
-		return GET;
+		return OP_GET;
 	if (!strcmp(s, "HEAD"))
-		return HEAD;
+		return OP_HEAD;
 	if (!strcmp(s, "PUT"))
-		return PUT;
+		return OP_PUT;
 	if (!strcmp(s, "POST"))
-		return POST;
+		return OP_POST;
 	if (!strcmp(s, "DELETE"))
-		return DELETE;
+		return OP_DELETE;
 	return -1;
 }
 
@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
 		.logfile    = stderr,
 	};
 
-	int ch = 0, op = GET;
+	int ch = 0, op = OP_GET;
 	const char *url = NULL;
 	httpc_getopt_t opt = { .init = 0 };
 	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:")) != -1) {
@@ -222,11 +222,11 @@ int main(int argc, char **argv) {
 	}
 	httpc_dump_t d = { .position = 0, .output = stdout };
 	switch (op) {
-	case GET:    return httpc_get(&a, url, httpc_dump_cb, &d) != HTTPC_OK ? 1 : 0;
-	case HEAD:   return httpc_head(&a, url) != HTTPC_OK ? 1 : 0;
-	case PUT:    return httpc_put(&a, url, httpc_put_cb, stdin) != HTTPC_OK ? 1 : 0;
-	case DELETE: return httpc_delete(&a, url) != HTTPC_OK ? 1 : 0; 
-	case POST: 
+	case OP_GET:    return httpc_get(&a, url, httpc_dump_cb, &d) != HTTPC_OK ? 1 : 0;
+	case OP_HEAD:   return httpc_head(&a, url) != HTTPC_OK ? 1 : 0;
+	case OP_PUT:    return httpc_put(&a, url, httpc_put_cb, stdin) != HTTPC_OK ? 1 : 0;
+	case OP_DELETE: return httpc_delete(&a, url) != HTTPC_OK ? 1 : 0; 
+	case OP_POST: 
 	default:
 		fprintf(stderr, "operation unimplemented\n");
 		return 1;
