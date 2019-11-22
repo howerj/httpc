@@ -3,6 +3,9 @@
 # HTTPC: HTTP Client Test Suite
 # Tests go here!
 #
+# NB. If cURL is installed we could use that to compare 
+# downloaded files from various sources.
+#
 
 NC=nc
 LOCAL=127.0.0.1
@@ -45,7 +48,7 @@ EOF
 
 echo "${EX1}" | unix2dos | ${NC} -l -p 8080 &
 p1=$!
-echo "${EX2}" | unix2dos | "${NC}" -l -p 8081 < ex2.txt &
+echo "${EX2}" | unix2dos | "${NC}" -l -p 8081 &
 p2=$!
 
 ./httpc "${LOCAL}:8081"

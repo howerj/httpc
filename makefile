@@ -1,4 +1,4 @@
-VERSION=0x000003ul
+VERSION=0x000004ul
 STD=c99
 CFLAGS=-Wall -Wextra -fPIC -std=${STD} -O2 -pedantic -g -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="${VERSION}"
 TARGET=httpc

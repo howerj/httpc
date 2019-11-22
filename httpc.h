@@ -32,7 +32,7 @@ typedef struct {
 	     *socketopts; /* passed to open */
 } httpc_os_t;
 
-enum { HTTPC_ERROR = -1, HTTPC_OK = 0, HTTPC_BLOCKED = 1 };
+enum { HTTPC_ERROR = -1, HTTPC_OK = 0, /* Reserved: HTTPC_BLOCKED = 1 */ };
 
 typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, size_t position);
 
