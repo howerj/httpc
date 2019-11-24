@@ -25,11 +25,9 @@ static int httpc_init(void) {
 	const int r = WSAStartup(0x0202, &d) < 0 ? -1 : 1;
 	init = r;
 	if (atexit(httpc_cleanup) < 0) {
-		//(void)httpc_log("atexit(httpc_cleanup) failed");
 		init = -1;
 		httpc_cleanup();
 	}
-	//(void)httpc_log("initialization %s", init < 0 ? "failed" : "passed");
 	return init;
 }
 
@@ -51,7 +49,6 @@ int httpc_logger(void *logger, const char *fmt, va_list ap) {
 	return r;
 }
 
-/* TODO: Add keepalive, timeout, ... */
 int httpc_open(void **sock, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
 	assert(sock);
 	assert(host_or_ip);
@@ -63,39 +60,30 @@ int httpc_open(void **sock, void *opts, const char *host_or_ip, unsigned short p
 		.ai_socktype = SOCK_STREAM,
 	};
 
-	if (httpc_init() < 0) {
-		//(void)httpc_log("Winsock initialization failed");
+	if (httpc_init() < 0)
 		return HTTPC_ERROR;
-	}
 
-	if (use_ssl) {
-		//(void)httpc_log("SSL not implemented yet");
+	if (use_ssl)
 		return HTTPC_ERROR;
-	}
 	port = port ? port : 80;
 
 	char sport[32] = { 0 };
 	snprintf(sport, sizeof sport, "%u", port);
-	if ((rv = getaddrinfo(host_or_ip, sport, &hints, &servinfo)) != 0) {
-		//httpc_log("getaddrinfo: %s", gai_strerror(rv));
+	if ((rv = getaddrinfo(host_or_ip, sport, &hints, &servinfo)) != 0)
 		return HTTPC_ERROR;
-	}
 
 	for(p = servinfo; p != NULL; p = p->ai_next) {
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-			//httpc_log("client: socket");
 			continue;
 		}
 		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
 			closesocket(sockfd);
-			//httpc_log("client: connect");
 			continue;
 		}
 		break;
 	}
 
 	if (p == NULL) {
-		//httpc_log("client: failed to connect");
 		freeaddrinfo(servinfo);
 		return HTTPC_ERROR;
 	}
@@ -104,10 +92,8 @@ int httpc_open(void **sock, void *opts, const char *host_or_ip, unsigned short p
 	if (NULL == inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), s, sizeof s)) {
 		(void)closesocket(sockfd);
 		freeaddrinfo(servinfo);
-		//httpc_log("inet_ntop error");
 		return HTTPC_ERROR;
 	}
-	//httpc_log("client: connecting to '%s'", s);
 
 	freeaddrinfo(servinfo);
 	*sock = (void*)(intptr_t)sockfd;
@@ -125,7 +111,6 @@ int httpc_read(void *socket, unsigned char *buf, size_t *length) {
 	const intptr_t fd = (intptr_t)socket;
 	const ssize_t re = recv(fd, (char*)buf, *length, 0);
 	if (re == -1) {
-		//(void)httpc_log("read error: %ld/%s/%d", (long)re, strerror(errno), (int)fd);
 		*length = 0;
 		return HTTPC_ERROR;
 	}
@@ -138,10 +123,8 @@ int httpc_write(void *socket, const unsigned char *buf, const size_t length) {
 	errno = 0;
 	const intptr_t fd = (intptr_t)socket;
 	const ssize_t wr = send(fd, (const char *)buf, length, 0);
-	if ((size_t)wr != length || wr == -1) {
-		//(void)httpc_log("write error: %ld/%s/%d", (long)wr, strerror(errno), (int)fd);
+	if ((size_t)wr != length || wr == -1)
 		return HTTPC_ERROR;
-	}
 	return HTTPC_OK;
 }
 

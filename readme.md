@@ -128,6 +128,7 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
   - [ ] Reduce number of logging format strings
   - [ ] Allocate small buffers on the stack, then move to heap if needed
     amount becomes too big.
+* [ ] Add SSL, <https://github.com/eduardsui/tlse/> could be used.
 * [ ] Add more assertions
   - Pre and post conditions
   - Assert buffer indices within bounds

@@ -17,11 +17,11 @@
 typedef void *(*allocator_fn)(void *arena, void *ptr, size_t oldsz, size_t newsz);
 #endif
 
-typedef struct {
+struct httpc_os {
 	allocator_fn allocator;
 
-	int (*open)(void **socket, void *opts, const char *domain, unsigned short port, int use_ssl);
-	int (*close)(void *socket);
+	int (*open)(void **socket, struct httpc_os *os, void *opts, const char *domain, unsigned short port, int use_ssl);
+	int (*close)(void *socket, struct httpc_os *os);
 	int (*read)(void *socket, unsigned char *buf, size_t *length);
 	int (*write)(void *socket, const unsigned char *buf, size_t length);
 	int (*sleep)(unsigned long milliseconds);
@@ -30,7 +30,9 @@ typedef struct {
 	void *arena       /* passed to allocator */, 
 	     *logfile,    /* passed to logger */
 	     *socketopts; /* passed to open */
-} httpc_os_t;
+};
+
+typedef struct httpc_os httpc_os_t;
 
 enum { HTTPC_ERROR = -1, HTTPC_OK = 0, /* Reserved: HTTPC_BLOCKED = 1 */ };
 
@@ -51,8 +53,8 @@ HTTPC_API int httpc_tests(httpc_os_t *a);
 
 /* you provide these functions and populate 'httpc_os_t' with them - return
  * negative on failure, zero on success. */
-HTTPC_API extern int httpc_open(void **socket, void *socketopts, const char *domain, unsigned short port, int use_ssl);
-HTTPC_API extern int httpc_close(void *socket);
+HTTPC_API extern int httpc_open(void **socket, httpc_os_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
+HTTPC_API extern int httpc_close(void *socket, httpc_os_t *a);
 HTTPC_API extern int httpc_read(void *socket, unsigned char *buf, size_t *length);
 HTTPC_API extern int httpc_write(void *socket, const unsigned char *buf, size_t length);
 HTTPC_API extern int httpc_sleep(unsigned long milliseconds);
