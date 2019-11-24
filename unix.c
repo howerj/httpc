@@ -13,10 +13,116 @@
 #include <unistd.h>
 /*#include <netinet/tcp.h> // Not portable, needed for keepalive */
 
+#ifndef USE_SSL
+#define USE_SSL (1)
+#endif
+
+#if USE_SSL != 0
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 #define UNUSED(X) ((void)(X))
 
-/* see https://beej.us/guide/bgnet/html/#cb46-22 */
+typedef struct {
+	void *ctx;
+	void *ssl;
+	int fd;
+	unsigned use_ssl :1;
+} socket_t;
 
+static void *allocate(httpc_os_t *a, size_t sz) {
+	assert(a);
+	void *r = a->allocator(a->arena, NULL, 0, sz);
+	return r ? memset(r, 0, sz) : r;
+}
+
+static void deallocate(httpc_os_t *a, void *ptr) {
+	assert(a);
+	a->allocator(a->arena, ptr, 0, 0);
+}
+
+static int socket_close(socket_t *s, httpc_os_t *a) {
+	assert(s);
+	if (!s)
+		return HTTPC_OK;
+	int r = HTTPC_OK;
+#if USE_SSL != 0
+	if (s->use_ssl) {
+		if (s->ssl)
+			SSL_free(s->ssl);
+		s->ssl = NULL;
+		if (s->ctx)
+			SSL_CTX_free(s->ctx);
+		s->ctx = NULL;
+	}
+#endif
+	if (s->fd >= 0)
+		r = close(s->fd);
+	s->fd = -1;
+	deallocate(a, s);
+	return r;
+}
+
+static int ssl_open(socket_t *s, httpc_os_t *a, const char *domain) {
+	assert(s);
+	assert(domain);
+	if (s->fd < 0)
+		return HTTPC_ERROR;
+#if USE_SSL == 0
+	return HTTPC_ERROR;
+#else
+	const SSL_METHOD *method = TLS_client_method();
+	s->ctx = SSL_CTX_new(method);
+	if (!(s->ctx))
+		goto fail;
+
+	s->ssl = SSL_new(s->ctx);
+	if (!(s->ssl))
+		goto fail;
+
+	SSL_set_fd(s->ssl, s->fd);
+	if (SSL_connect(s->ssl) != 1)
+		goto fail;
+
+	if (SSL_set_tlsext_host_name(s->ssl, domain) != 1)
+		goto fail;
+#endif
+	return HTTPC_OK;
+fail:
+	socket_close(s, a);
+	return HTTPC_ERROR;
+}
+
+/* NB. read/write do not check if we can retry - too lazy atm to do so */
+static int ssl_read(socket_t *s, unsigned char *buf, size_t *length) {
+	assert(s);
+	assert(buf);
+	assert(length);
+#if USE_SSL == 0
+	return HTTPC_ERROR;
+#else
+	const size_t requested = *length;
+	*length = 0;
+	const int r = SSL_read(s->ssl, buf, requested);
+	if (r < 0)
+		return HTTPC_ERROR;
+	*length = r;
+	return HTTPC_OK;
+#endif
+}
+
+static int ssl_write(socket_t *s, const unsigned char *buf, size_t length) {
+	assert(s);
+	assert(buf);
+#if USE_SSL == 0
+	return HTTPC_ERROR;
+#else
+	return SSL_write(s->ssl, buf, length) <= 0 ? HTTPC_ERROR : HTTPC_OK;
+#endif
+}
+
+/* see https://beej.us/guide/bgnet/html/#cb46-22 */
 static void *get_in_addr(struct sockaddr *sa) {
 	assert(sa);
 	if (sa->sa_family == AF_INET)
@@ -35,83 +141,80 @@ int httpc_logger(void *logger, const char *fmt, va_list ap) {
 	return r;
 }
 
-int httpc_open(void **sock, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
+int httpc_open(void **sock, httpc_os_t *a, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
 	assert(sock);
+	assert(a);
 	assert(host_or_ip);
 	UNUSED(opts);
-	int sockfd = -1, rv = 0;
 	struct addrinfo *servinfo = NULL, *p = NULL;
        	struct addrinfo hints = {
 		.ai_family   = AF_UNSPEC,
 		.ai_socktype = SOCK_STREAM,
 	};
 
-	if (use_ssl) {
+	socket_t *s = allocate(a, sizeof *s);
+	if (!s)
 		return HTTPC_ERROR;
-	}
+	s->use_ssl = use_ssl;
+	s->fd = -1;
+
+	if (!USE_SSL && use_ssl)
+		return HTTPC_ERROR;
 
 	port = port ? port : 80;
 
 	char sport[32] = { 0 };
 	snprintf(sport, sizeof sport, "%u", port);
-	if ((rv = getaddrinfo(host_or_ip, sport, &hints, &servinfo)) != 0) {
-		//httpc_log("getaddrinfo: %s", gai_strerror(rv));
-		return HTTPC_ERROR;
-	}
+	if (getaddrinfo(host_or_ip, sport, &hints, &servinfo) != 0)
+		goto fail;
 
-	for(p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-			//httpc_log("client socket: %s", strerror(errno));
+	for (p = servinfo; p != NULL; p = p->ai_next) {
+		if ((s->fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
 			continue;
 		}
-		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-			close(sockfd);
-			sockfd = -1;
-			//httpc_log("client connect: %s", strerror(errno));
+		if (connect(s->fd, p->ai_addr, p->ai_addrlen) == -1) {
+			close(s->fd);
+			s->fd = -1;
 			continue;
 		}
 		break;
 	}
 
 	if (p == NULL) {
-		//httpc_log("client failed to connect");
 		freeaddrinfo(servinfo);
-		return HTTPC_ERROR;
-	}
-
-	char s[INET6_ADDRSTRLEN] = { 0 };
-	if (NULL == inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), s, sizeof s)) {
-		//httpc_log("inet_ntop error");
 		goto fail;
 	}
+
+	char ip[INET6_ADDRSTRLEN] = { 0 };
+	if (NULL == inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), ip, sizeof ip))
+		goto fail;
 
 	freeaddrinfo(servinfo);
 	servinfo = NULL;
 
 	/* If you want to set the keep alive as well:
-	setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT,   &(int){   5 }, sizeof(int));
-	setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE,  &(int){  30 }, sizeof(int));
-	setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &(int){ 120 }, sizeof(int));
+	setsockopt(s->fd, IPPROTO_TCP, TCP_KEEPCNT,   &(int){   5 }, sizeof(int));
+	setsockopt(s->fd, IPPROTO_TCP, TCP_KEEPIDLE,  &(int){  30 }, sizeof(int));
+	setsockopt(s->fd, IPPROTO_TCP, TCP_KEEPINTVL, &(int){ 120 }, sizeof(int));
 	*/
 
 	struct timeval tx_tv = { .tv_sec = 30 }, rx_tv = { .tv_sec = 30 };
 
-	if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tx_tv, sizeof tx_tv) < 0) {
-		//httpc_log("SO_SNDTIMEO failed");
+	if (setsockopt(s->fd, SOL_SOCKET, SO_SNDTIMEO, &tx_tv, sizeof tx_tv) < 0)
 		goto fail;
-	}
 
-	if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &rx_tv, sizeof rx_tv) < 0) {
-		//httpc_log("SO_RCVTIMEO failed");
+	if (setsockopt(s->fd, SOL_SOCKET, SO_RCVTIMEO, &rx_tv, sizeof rx_tv) < 0)
 		goto fail;
-	}
 
-	*sock = (void*)(intptr_t)sockfd;
-	//httpc_log("client: connecting to '%s'", s);
+	if (use_ssl) {
+		if (ssl_open(s, a, host_or_ip) < 0)
+			goto fail;
+	} 
+	*sock = s;
 	return HTTPC_OK;
 fail:
-	if (sockfd != -1)
-		close(sockfd);
+	*sock = NULL;
+	socket_close(s, a);
 	if (servinfo) {
 		freeaddrinfo(servinfo);
 		servinfo = NULL;
@@ -119,14 +222,19 @@ fail:
 	return HTTPC_ERROR;
 }
 
-int httpc_close(void *socket) {
-	return close((intptr_t)socket) < 0 ? HTTPC_ERROR : HTTPC_OK;
+int httpc_close(void *socket, httpc_os_t *a) {
+	assert(a);
+	return socket_close(socket, a);
 }
 
 int httpc_read(void *socket, unsigned char *buf, size_t *length) {
+	assert(socket);
 	assert(length);
 	assert(buf);
-	const intptr_t fd = (intptr_t)socket;
+	socket_t *s = socket;
+	if (s->use_ssl)
+		return ssl_read(s, buf, length);
+	const int fd = s->fd;
 	ssize_t re = 0;
 again:
 	errno = 0;
@@ -134,7 +242,6 @@ again:
 	if (re == -1) {
 		if (errno == EINTR)
 			goto again;
-		//(void)httpc_log("read error: %ld/%s/%d", (long)re, strerror(errno), (int)fd);
 		*length = 0;
 		return HTTPC_ERROR;
 	}
@@ -143,8 +250,12 @@ again:
 }
 
 int httpc_write(void *socket, const unsigned char *buf, const size_t length) {
+	assert(socket);
 	assert(buf);
-	const intptr_t fd = (intptr_t)socket;
+	socket_t *s = socket;
+	if (s->use_ssl)
+		return ssl_write(s, buf, length);
+	const int fd = s->fd;
 	ssize_t wr = 0;
 again:
 	errno = 0;
@@ -152,7 +263,6 @@ again:
 	if ((size_t)wr != length || wr == -1) {
 		if (errno == EINTR)
 			goto again;
-		//(void)httpc_log("write error: %ld/%s/%d", (long)wr, strerror(errno), (int)fd);
 		return HTTPC_ERROR;
 	}
 	return HTTPC_OK;

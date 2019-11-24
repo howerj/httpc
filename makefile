@@ -5,6 +5,7 @@ TARGET=httpc
 AR      = ar
 ARFLAGS = rcs
 DESTDIR = install
+USE_SSL =1
 
 ifeq ($(OS),Windows_NT)
 DLL=dll
@@ -13,6 +14,13 @@ LDLIBS= -lWs2_32
 else # Assume Unixen
 DLL=so
 PLATFORM=unix
+endif
+
+ifeq ($(USE_SSL),1)
+ifeq ($(PLATFORM),unix)
+LDLIBS += -lssl
+else
+endif
 endif
 
 .PHONY: all test clean dist install
@@ -51,6 +59,8 @@ install: ${TARGET} lib${TARGET}.a lib${TARGET}.${DLL} ${TARGET}.1
 	mkdir -p ${DESTDIR}/src
 	install -p -m 644 -D ${TARGET}.c ${TARGET}.h unix.c win.c main.c LICENSE readme.md makefile -t ${DESTDIR}/src
 	install -p -D t ${DESTDIR}/src/t
+	cp -a .git ${DESTDIR}/src/
+	cp -a .gitignore ${DESTDIR}/src/
 
 dist: install
 	tar zcf ${TARGET}-${VERSION}.tgz ${DESTDIR}

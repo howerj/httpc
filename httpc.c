@@ -74,12 +74,13 @@ struct httpc {
 	unsigned retries, redirects; /* retry count, redirect count */
 	unsigned response, v1, v2; /* HTTP response, HTTP version (1.0 or 1.1) */
 	unsigned short port;
-	unsigned use_ssl    :1, /* if set then SSL should be used on the connection */
-		 fatal      :1, /* if set then something has gone fatally wrong */
-		 http1_0    :1, /* request HTTP 1.0 only, can deal with HTTP 1.1 response however */
-		 identity   :1, /* 1 == identity encoded, 0 == chunked */
-		 redirect   :1, /* if set then a redirect is going on */
-		 length_set :1; /* has length been set on a PUT/POST? */
+	unsigned use_ssl       :1, /* if set then SSL should be used on the connection */
+		 fatal         :1, /* if set then something has gone fatally wrong */
+		 accept_ranges :1, /* if set then the server accepts ranges */
+		 http1_0       :1, /* request HTTP 1.0 only, can deal with HTTP 1.1 response however */
+		 identity      :1, /* 1 == identity encoded, 0 == chunked */
+		 redirect      :1, /* if set then a redirect is going on */
+		 length_set    :1; /* has length been set on a PUT/POST? */
 };
 
 /* Modified from: <https://stackoverflow.com/questions/342409>
@@ -122,6 +123,7 @@ static int base64_encode(const unsigned char *in, const size_t input_length, uns
 }
 
 static inline void reverse(char * const r, const size_t length) {
+	assert(r);
 	const size_t last = length - 1;
 	for (size_t i = 0; i < length / 2ul; i++) {
 		const size_t t = r[i];
@@ -163,7 +165,17 @@ static int httpc_dead(httpc_t *h) {
 	return h->fatal;
 }
 
-static void log_fmt(httpc_t *h, const char *fmt, ...) {
+#ifdef __GNUC__
+#define HTTPC_LOG_FMT_ATTR __attribute__ ((format (printf, 2, 3)))
+#define HTTPC_LOG_LINE_ATTR __attribute__ ((format (printf, 6, 7)))
+static void httpc_log_fmt(httpc_t *h, const char *fmt, ...) HTTPC_LOG_FMT_ATTR;
+static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const unsigned line, const char *fmt, ...) HTTPC_LOG_LINE_ATTR;
+#else
+#define HTTPC_LOG_FMT_ATTR
+#define HTTPC_LOG_LINE_ATTR
+#endif
+
+static void httpc_log_fmt(httpc_t *h, const char *fmt, ...) {
 	assert(fmt);
 	va_list ap;
 	va_start(ap, fmt);
@@ -173,16 +185,16 @@ static void log_fmt(httpc_t *h, const char *fmt, ...) {
 		(void)httpc_kill(h);
 }
 
-static int log_line(httpc_t *h, const char *type, int die, int ret, const unsigned line, const char *fmt, ...) {
+static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const unsigned line, const char *fmt, ...) {
 	assert(h);
 	assert(fmt);
 	va_list ap;
-	log_fmt(h, "%s:%u ", type, line);
+	httpc_log_fmt(h, "%s:%u ", type, line);
 	va_start(ap, fmt);
 	if (h->os.logger(h->os.logfile, fmt, ap) < 0)
 		(void)httpc_kill(h);
 	va_end(ap);
-	log_fmt(h, "\n");
+	httpc_log_fmt(h, "\n");
 	if (die)
 		httpc_kill(h);
 	return httpc_dead(h) ? HTTPC_ERROR : ret;
@@ -195,9 +207,9 @@ static inline int code(const int code) { return code; } /* suppresses warnings *
 #define error(H, ...) (code(HTTPC_ERROR))
 #define fatal(H, ...) (httpc_kill((H)))
 #else
-#define info(H, ...)  log_line((H), "info",  0, HTTPC_OK,    __LINE__, __VA_ARGS__)
-#define error(H, ...) log_line((H), "error", 0, HTTPC_ERROR, __LINE__, __VA_ARGS__)
-#define fatal(H, ...) log_line((H), "fatal", 1, HTTPC_ERROR, __LINE__, __VA_ARGS__)
+#define info(H, ...)  httpc_log_line((H), "info",  0, HTTPC_OK,    __LINE__, __VA_ARGS__)
+#define error(H, ...) httpc_log_line((H), "error", 0, HTTPC_ERROR, __LINE__, __VA_ARGS__)
+#define fatal(H, ...) httpc_log_line((H), "fatal", 1, HTTPC_ERROR, __LINE__, __VA_ARGS__)
 #endif
 
 static void *httpc_malloc(httpc_t *h, const size_t size) {
@@ -486,7 +498,7 @@ static int httpc_request_send_header(httpc_t *h, int op) {
 		goto fail;
 	if (buffer_add(h, b, "\r\n") < 0)
 		goto fail;
-	if (op == HTTPC_GET && h->http1_0 == 0 && h->position) {
+	if (op == HTTPC_GET && h->http1_0 == 0 && h->position && h->accept_ranges) {
 		char range[64 + 1] = { 0 };
 		if (buffer_add(h, b, "Range: bytes=") < 0)
 			goto fail;
@@ -583,8 +595,7 @@ static inline int httpc_case_insensitive_compare(const char *a, const char *b, c
 	return 0;
 }
 
-/* TODO: Add backback for handling unknown response fields? */
-/* TODO: Add the 'Accept-Ranges' header (for bytes/none) */
+/* TODO: Add callback for handling unknown response fields? */
 static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 	assert(h);
 	assert(line);
@@ -597,6 +608,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 #define X_MACRO_FIELDS \
 	X("Transfer-Encoding:", FLD_TRANSFER_ENCODING) \
 	X("Content-Length:",    FLD_CONTENT_LENGTH)\
+	X("Accept-Ranges:",     FLD_ACCEPT_RANGES)\
 	X("Location:",          FLD_REDIRECT)
 
 	enum {
@@ -623,6 +635,16 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 		if (httpc_case_insensitive_compare(fld->name, line, fld->length))
 			continue;
 		switch (fld->type) {
+		case FLD_ACCEPT_RANGES:
+			if (strstr(line, "bytes")) {
+				h->accept_ranges = h->http1_0 == 0;
+				return info(h, "Accept-Ranges: bytes");
+			}
+			if (strstr(line, "none")) {
+				h->accept_ranges = 0;
+				return info(h, "Accept-Ranges: none");
+			}
+			return error(h, "unknown accept ranges field: %s", line);
 		case FLD_TRANSFER_ENCODING:
 			if (strchr(line, ','))
 				return error(h, "Transfer encoding too complex, cannot handle it: %s", line);
@@ -743,6 +765,7 @@ static int httpc_parse_response_header(httpc_t *h) {
 	h->length = 0;
 	h->identity = 1;
 	h->length_set = 0;
+	h->accept_ranges = h->http1_0 == 0;
 
 	length = sizeof line;
 	if (httpc_read_until_line_end(h, line, &length) < 0)
@@ -926,7 +949,7 @@ static inline void banner(httpc_t *h) {
 	USED(y);
 	USED(z);
 	USED(opt);
-	USED(log_line);
+	USED(httpc_log_line);
 	info(h, "Project: HTTPC, embeddable HTTP client version %u.%u.%u (opts %u)", x, y, z, opt);
 	info(h, "Repo:    https://github.com/howerj/httpc");
 	info(h, "Author:  Richard James Howe");
@@ -947,7 +970,7 @@ static int httpc_op(httpc_t *h, const char *url, int op) {
 	for (; h->retries < HTTPC_CONNECTION_ATTEMPTS; h->retries++) {
 		if (httpc_dead(h))
 			return fatal(h, "cannot continue quitting"); /* TODO minimize the number of error strings */
-		if (h->os.open(&h->socket, h->os.socketopts, h->domain, h->port, h->use_ssl) == HTTPC_OK) {
+		if (h->os.open(&h->socket, &h->os, h->os.socketopts, h->domain, h->port, h->use_ssl) == HTTPC_OK) {
 			open = 1;
 			if (httpc_request_send_header(h, op) < 0)
 				goto backoff;
@@ -959,7 +982,7 @@ static int httpc_op(httpc_t *h, const char *url, int op) {
 				goto backoff;
 
 			if (h->redirect) {
-				(void)h->os.close(h->socket);
+				(void)h->os.close(h->socket, &h->os);
 				open = 0;
 				h->redirect = 0;
 				continue;
@@ -975,7 +998,7 @@ static int httpc_op(httpc_t *h, const char *url, int op) {
 backoff:
 		h->redirect = 0;
 		if (open) {
-			(void)h->os.close(h->socket);
+			(void)h->os.close(h->socket, &h->os);
 			open = 0;
 		}
 		h->socket = NULL;
@@ -988,7 +1011,7 @@ backoff:
 		r = HTTPC_ERROR;
 end:
 	if (open)
-		if (h->os.close(h->socket) < 0)
+		if (h->os.close(h->socket, &h->os) < 0)
 			r = HTTPC_ERROR;
 	if (httpc_free(h, h->url) < 0)
 		r = HTTPC_ERROR;
@@ -1077,8 +1100,9 @@ typedef struct {
 	size_t length, position;
 } testing_t;
 
-static inline int httpc_testing_open(void **socket, void *opts, const char *domain, unsigned short port, int use_ssl) {
+static inline int httpc_testing_open(void **socket, httpc_os_t *a, void *opts, const char *domain, unsigned short port, int use_ssl) {
 	assert(socket);
+	assert(a);
 	assert(opts);
 	assert(domain);
 	assert(port != 0);
@@ -1130,7 +1154,8 @@ static inline int httpc_testing_open(void **socket, void *opts, const char *doma
 	return HTTPC_ERROR;
 }
 
-static inline int httpc_testing_close(void *socket) {
+static inline int httpc_testing_close(void *socket, httpc_os_t *a) {
+	assert(a);
 	assert(socket);
 	testing_t *t = socket;
 	return httpc_free(t->h, t);
