@@ -18,8 +18,8 @@ typedef void *(*allocator_fn)(void *arena, void *ptr, size_t oldsz, size_t newsz
 #endif
 
 enum {
-	HTTPC_OPT_HTTP_1_0   = 1u << 0,
-	HTTPC_OPT_LOGGING_ON = 1u << 1,
+	HTTPC_OPT_HTTP_1_0   = 1u << 0, /* attempt HTTP 1.0 request, although still process HTTP 1.1 responses */
+	HTTPC_OPT_LOGGING_ON = 1u << 1, /* turn logging on, if compiled in */
 };
 
 struct httpc_options {
@@ -41,7 +41,7 @@ struct httpc_options {
 
 typedef struct httpc_options httpc_options_t;
 
-enum { HTTPC_ERROR = -1, HTTPC_OK = 0, /* Reserved: HTTPC_BLOCKED = 1 */ };
+enum { HTTPC_ERROR = -1, HTTPC_OK = 0, /* Reserved for non-blocking mode (not implemented yet): HTTPC_BLOCKED = 1 */ };
 
 typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, size_t position);
 

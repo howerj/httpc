@@ -49,10 +49,12 @@ int httpc_logger(void *logger, const char *fmt, va_list ap) {
 	return r;
 }
 
-int httpc_open(void **sock, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
+int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
 	assert(sock);
+	assert(a);
 	assert(host_or_ip);
 	UNUSED(opts);
+	UNUSED(a);
 	int sockfd = -1, rv = 0;
 	struct addrinfo *servinfo = NULL, *p = NULL;
        	struct addrinfo hints = {
@@ -100,7 +102,9 @@ int httpc_open(void **sock, void *opts, const char *host_or_ip, unsigned short p
 	return HTTPC_OK;
 }
 
-int httpc_close(void *socket) {
+int httpc_close(void *socket, httpc_options_t *a) {
+	assert(a);
+	UNUSED(a);
 	return closesocket((intptr_t)socket) < 0 ? HTTPC_ERROR : HTTPC_OK;
 }
 

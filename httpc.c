@@ -23,6 +23,10 @@
 #define HTTPC_TESTS_ON (1u)
 #endif
 
+#ifndef HTTPC_LOGGING
+#define HTTPC_LOGGING (1u)
+#endif
+
 #ifndef HTTPC_CONNECTION_ATTEMPTS
 #define HTTPC_CONNECTION_ATTEMPTS (3u)
 #endif
@@ -37,10 +41,6 @@
 
 #ifndef HTTPC_MAX_HEADER /* maximum size for the header; 0 == infinite length allowed */
 #define HTTPC_MAX_HEADER (4096ul)
-#endif
-
-#ifndef HTTPC_LOGGING
-#define HTTPC_LOGGING (1u)
 #endif
 
 #define USED(X)                 ((void)(X)) /* warning suppression: variable is used conditionally */
@@ -150,6 +150,8 @@ static unsigned num_to_str(char b[64 + 1], unsigned long u, const unsigned long 
 int httpc_version(unsigned long *version) {
 	assert(version);
 	unsigned long spec = 0;
+	spec |= HTTPC_TESTS_ON << 0;
+	spec |= HTTPC_LOGGING  << 1;
 	*version = (spec << 24) | HTTPC_VERSION;
 	return HTTPC_VERSION == 0 ? HTTPC_ERROR : HTTPC_OK;
 }
@@ -902,8 +904,13 @@ static int httpc_generate_request_body(httpc_t *h) {
 	for (size_t pos = 0;;) {
 		unsigned char buf[HTTPC_STACK_BUFFER_SIZE];
 		r = h->fn(h->fn_param, buf, sizeof buf, pos);
-		if (r == 0)
-			break;
+		if (r == 0) {
+			if (chunky) {
+				if (h->os.write(h->socket, (unsigned char*)"0\r\n", 3) < 0)
+					r = error(h, "write failed");
+			}
+			break; /* done! */
+		}
 		if (r < 0) {
 			error(h, "fn failed");
 			break;
@@ -929,6 +936,14 @@ static int httpc_generate_request_body(httpc_t *h) {
 				r = error(h, "write failed");
 				break;
 			}
+		}
+
+		if (r < (int)sizeof buf) {
+			if (chunky) {
+				if (h->os.write(h->socket, (unsigned char*)"0\r\n", 3) < 0)
+					r = error(h, "write failed");
+			}
+			break;
 		}
 	}
 	if (r < 0)
@@ -981,9 +996,15 @@ static int httpc_op(httpc_t *h, const char *url, int op) {
 				if (httpc_generate_request_body(h) < 0)
 					goto backoff;
 			}
-			if (httpc_parse_response_header(h) < 0)
+			if (httpc_parse_response_header(h) < 0) {
+				if (op == HTTPC_PUT || op == HTTPC_POST || op == HTTPC_DELETE) {
+					if (h->response) {
+						r = error(h, "request failed");
+						goto end;
+					}
+				}
 				goto backoff;
-
+			}
 			if (h->redirect) {
 				(void)h->os.close(h->socket, &h->os);
 				open = 0;
@@ -1028,6 +1049,7 @@ int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *para
 	return httpc_op(&h, url, HTTPC_GET);
 }
 
+/* TODO: This put is a little buggy around the input and response handling */
 int httpc_put(httpc_options_t *a, const char *url, httpc_callback fn, void *param) {
 	assert(a);
 	assert(url);
@@ -1042,7 +1064,7 @@ int httpc_head(httpc_options_t *a, const char *url) {
 	return httpc_op(&h, url, HTTPC_HEAD);
 }
 
-/* TODO: Error handling/backoff needs tweaking for DELETE - fail if operation not successful immediately */
+/* TODO: Implement OPTIONS/TRACE/POST */
 int httpc_delete(httpc_options_t *a, const char *url) { /* NB. A DELETE body is technically allowed... */
 	assert(a);
 	assert(url);

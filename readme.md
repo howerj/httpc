@@ -20,7 +20,9 @@ The library implements a retry mechanism and enough of [HTTP 1.1][] to allow
 partially downloaded files to be resumed. This allows for a more reliable file
 transfer over a bad network connection than [HTTP 1.0][] allows. A simple 
 [HTTP 1.0][] client is almost trivial to implement, however it is not very
-reliable.
+reliable. Only certain operations are retried in full with a resume
+("GET"/"HEAD"), others are not retried if a negative response is received
+("DELETE"/"POST"/"POST").
 
 There are other libraries that do something similar, however they tend to be
 larger, more complex and more complete. [cURL][] is an example of one such
@@ -28,7 +30,7 @@ program and library - if you do decided to use it, good luck porting it!
 
 # EXAMPLE USAGE
 
-	Usage: ./httpc [-ht] *OR* -u URL *OR* URL
+	Usage: ./httpc [-ht] *OR* -[1v] -u URL *OR* -[1v] URL
 
 Options:
 
@@ -37,6 +39,10 @@ Options:
 * **-u** : specify the URL to attempt to download from
 
 * **-t** : run the internal tests, returning zero on success, and none zero on failure
+
+* **-1** : perform a HTTP 1.0 request, with HTTP 1.1 responses still being dealt with
+
+* **-v** : add logging
 
 Examples:
 
@@ -87,6 +93,10 @@ more likely to have been tested on a 64-bit platform.
 This program will return a non-zero value on failure and zero on success. Like
 pretty much every Unix program ever.
 
+# LICENSE
+
+This program is licensed under the [The Unlicense][], do what thou wilt.
+
 # BUGS
 
 Known issues include:
@@ -103,11 +113,10 @@ information on what platform you are compiling your code on (OS, 32/64-bit,
 ...), tracing information (for example, valgrind output), a minimal test 
 case, thoughts, comments and general rants.
 
-# LICENSE
+# TO DO
 
-This program is licensed under the [The Unlicense][], do what thou wilt.
-
-# Goals
+The following a list of outstanding features and ideas for the project, they
+may or may not be implemented.
 
 * [x] Get basic functionality sorted
 * [x] Handle partially downloaded files correctly
@@ -116,10 +125,12 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
   difficult that it first seems. Perhaps the line number could be used as
   a way of storing state...
 * [ ] Add a HTTPS version of the open/close functions
-* This project could be extended to support other, small, Internet related
+  - [x] On Linux/Unixen
+  - [ ] On Windows
+* [ ] This project could be extended to support other, small, Internet related
   protocols that are useful in an embedded context and are also simple to
-  implement, 
-* Implement [ntp][] and [dns][] clients.
+  implement, such as [ntp][] and [dns][] clients. NTP and DNS are both needed
+  to implement the full HTTP(S) stack.
 * [ ] Be more liberal in what we accept to allow a slightly misbehaving server
   to still serve us files. This can be done by:
    - Allowing Unix line termination to be used instead of the proper line
