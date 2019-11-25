@@ -106,7 +106,7 @@ static void *httpc_allocator(void *arena, void *ptr, const size_t oldsz, const s
 /* NOTE: The way the callback mechanism works, the callback has to keep track
  * of the position, we should probably do that in the library instead,
  * discarding everything until we get back to where we are. Also bear in mind
- * even if "position < d->position", "position + length" could be greater than 
+ * even if "position < d->position", "position + length" could be greater than
  * "d->position". */
 static int httpc_dump_cb(void *param, unsigned char *buf, size_t length, size_t position) {
 	assert(param);
@@ -145,7 +145,7 @@ static int help(FILE *out, const char *arg0) {
 	const int y = (version >>  8) & 0xFFu;
 	const int z = (version >>  0) & 0xFFu;
 	const char *fmt = "\
-Usage:      %s -[ht] -u www.example.com/index.html\n\n\
+Usage:      %s -[ht1v] -u www.example.com/index.html\n\n\
 Project:    Embeddable HTTP(S) Client\n\
 Author:     Richard James Howe\n\
 Email:      <mailto:howe.r.j.89@gmail.com>\n\
@@ -158,6 +158,8 @@ Options:\n\n\
 \t-h\tprint help and exit\n\
 \t-t\trun the built in tests, returning failure status\n\
 \t-u URL\tset URL to use\n\
+\t-1 perform HTTP 1.0 request, not a HTTP 1.1 request\n\
+\t-v turn logging on\n\
 \tURL\tset URL to use\n\
 \n\
 Returns non zero value on failure. stdin(3) for input, stdout(3)\n\
@@ -189,7 +191,7 @@ int main(int argc, char **argv) {
 	binary(stdout);
 	binary(stderr);
 
-	httpc_os_t a = {
+	httpc_options_t a = {
 		.allocator  = httpc_allocator,
 		.open       = httpc_open,
 		.close      = httpc_close,
@@ -205,12 +207,14 @@ int main(int argc, char **argv) {
 	int ch = 0, op = OP_GET;
 	const char *url = NULL;
 	httpc_getopt_t opt = { .init = 0 };
-	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:")) != -1) {
+	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:1v")) != -1) {
 		switch (ch) {
 		case 'o': op = operation(opt.arg); break;
 		case 'h': return help(stderr, argv[0]), 0;
 		case 't': return -httpc_tests(&a);
 		case 'u': url = opt.arg; break;
+		case 'v': a.flags |= HTTPC_OPT_LOGGING_ON; break;
+		case '1': a.flags |= HTTPC_OPT_HTTP_1_0; break;
 		}
 	}
 	if (!url) {
@@ -225,8 +229,8 @@ int main(int argc, char **argv) {
 	case OP_GET:    return httpc_get(&a, url, httpc_dump_cb, &d) != HTTPC_OK ? 1 : 0;
 	case OP_HEAD:   return httpc_head(&a, url) != HTTPC_OK ? 1 : 0;
 	case OP_PUT:    return httpc_put(&a, url, httpc_put_cb, stdin) != HTTPC_OK ? 1 : 0;
-	case OP_DELETE: return httpc_delete(&a, url) != HTTPC_OK ? 1 : 0; 
-	case OP_POST: 
+	case OP_DELETE: return httpc_delete(&a, url) != HTTPC_OK ? 1 : 0;
+	case OP_POST:
 	default:
 		fprintf(stderr, "operation unimplemented\n");
 		return 1;

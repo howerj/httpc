@@ -53,11 +53,18 @@ port this client. If your platform has a [TCP/IP][] stack with a
 
 # BUILDING
 
-To build you will need a [C99][] compiler and [GNU Make][].
+To build you will need a [C99][] compiler and [GNU Make][]. There are minimal
+system dependencies on the C standard library, the other dependencies needed
+are for the [SSL/TLS][] library used which can be compiled out, and the systems
+[TCP/IP][] stack.
 
 To build:
 
 	make
+
+To build without [SSL/TLS][] support:
+
+	make DEFINES="-DUSE_SSL=0"
 
 To run the internal tests:
 
@@ -103,22 +110,16 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
 # Goals
 
 * [x] Get basic functionality sorted
-* [ ] Handle partially downloaded files correctly
-* [ ] Settle on an easy to use API which should allow reading/writing to
-   be redirected to wherever the user wants.
+* [x] Handle partially downloaded files correctly
 * [ ] Make the library non-blocking, that is it should be able to resume
   if a open, close, read or write on a socket would block. This is more
   difficult that it first seems. Perhaps the line number could be used as
   a way of storing state...
-* [ ] Try to remove any arbitrary limitations on the program
-* [ ] Come up with a decent test suite, perhaps by using [netcat][].
-  - Create a module that will allow the connection to be broken at
-  arbitrary points.
-  - Come up with a series of test files to be fed to netcat.
 * [ ] Add a HTTPS version of the open/close functions
 * This project could be extended to support other, small, Internet related
   protocols that are useful in an embedded context and are also simple to
-  implement, such as [ntp][] and [dns][] clients.
+  implement, 
+* Implement [ntp][] and [dns][] clients.
 * [ ] Be more liberal in what we accept to allow a slightly misbehaving server
   to still serve us files. This can be done by:
    - Allowing Unix line termination to be used instead of the proper line
@@ -128,7 +129,6 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
   - [ ] Reduce number of logging format strings
   - [ ] Allocate small buffers on the stack, then move to heap if needed
     amount becomes too big.
-* [ ] Add SSL, <https://github.com/eduardsui/tlse/> could be used.
 * [ ] Add more assertions
   - Pre and post conditions
   - Assert buffer indices within bounds

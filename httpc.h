@@ -1,4 +1,4 @@
-/* Project: Embeddable HTTP 1.0/1.1 Client 
+/* Project: Embeddable HTTP 1.0/1.1 Client
  * Author:  Richard James Howe
  * License: The Unlicense
  * Email:   howe.r.j.89@gmail.com */
@@ -17,22 +17,29 @@
 typedef void *(*allocator_fn)(void *arena, void *ptr, size_t oldsz, size_t newsz);
 #endif
 
-struct httpc_os {
+enum {
+	HTTPC_OPT_HTTP_1_0   = 1u << 0,
+	HTTPC_OPT_LOGGING_ON = 1u << 1,
+};
+
+struct httpc_options {
 	allocator_fn allocator;
 
-	int (*open)(void **socket, struct httpc_os *os, void *opts, const char *domain, unsigned short port, int use_ssl);
-	int (*close)(void *socket, struct httpc_os *os);
+	int (*open)(void **socket, struct httpc_options *os, void *opts, const char *domain, unsigned short port, int use_ssl);
+	int (*close)(void *socket, struct httpc_options *os);
 	int (*read)(void *socket, unsigned char *buf, size_t *length);
 	int (*write)(void *socket, const unsigned char *buf, size_t length);
 	int (*sleep)(unsigned long milliseconds);
 	int (*logger)(void *file, const char *fmt, va_list ap);
 
-	void *arena       /* passed to allocator */, 
+	void *arena       /* passed to allocator */,
 	     *logfile,    /* passed to logger */
 	     *socketopts; /* passed to open */
+
+	unsigned flags; /* Options for library */
 };
 
-typedef struct httpc_os httpc_os_t;
+typedef struct httpc_options httpc_options_t;
 
 enum { HTTPC_ERROR = -1, HTTPC_OK = 0, /* Reserved: HTTPC_BLOCKED = 1 */ };
 
@@ -43,18 +50,18 @@ typedef struct httpc httpc_t;
 
 /* all functions: return negative on failure, zero or positive on success */
 HTTPC_API int httpc_version(unsigned long *version); /* version in x.y.z format, z = LSB, MSB = compilation options */
-HTTPC_API int httpc_get(httpc_os_t *a, const char *url, httpc_callback fn, void *param);
-HTTPC_API int httpc_put(httpc_os_t *a, const char *url, httpc_callback fn, void *param); /* fn should return size, 0 on stop, -1 on failure */
-HTTPC_API int httpc_get_buffer(httpc_os_t *a, const char *url, char *buffer, size_t length); /* store GET to buffer */
-HTTPC_API int httpc_put_buffer(httpc_os_t *a, const char *url, char *buffer, size_t length); /* PUT from buffer */
-HTTPC_API int httpc_head(httpc_os_t *a, const char *url);
-HTTPC_API int httpc_delete(httpc_os_t *a, const char *url);
-HTTPC_API int httpc_tests(httpc_os_t *a);
+HTTPC_API int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *param);
+HTTPC_API int httpc_put(httpc_options_t *a, const char *url, httpc_callback fn, void *param); /* fn should return size, 0 on stop, -1 on failure */
+HTTPC_API int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length); /* store GET to buffer */
+HTTPC_API int httpc_put_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length); /* PUT from buffer */
+HTTPC_API int httpc_head(httpc_options_t *a, const char *url);
+HTTPC_API int httpc_delete(httpc_options_t *a, const char *url);
+HTTPC_API int httpc_tests(httpc_options_t *a);
 
-/* you provide these functions and populate 'httpc_os_t' with them - return
+/* you provide these functions and populate 'httpc_options_t' with them - return
  * negative on failure, zero on success. */
-HTTPC_API extern int httpc_open(void **socket, httpc_os_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
-HTTPC_API extern int httpc_close(void *socket, httpc_os_t *a);
+HTTPC_API extern int httpc_open(void **socket, httpc_options_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
+HTTPC_API extern int httpc_close(void *socket, httpc_options_t *a);
 HTTPC_API extern int httpc_read(void *socket, unsigned char *buf, size_t *length);
 HTTPC_API extern int httpc_write(void *socket, const unsigned char *buf, size_t length);
 HTTPC_API extern int httpc_sleep(unsigned long milliseconds);

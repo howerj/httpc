@@ -31,18 +31,18 @@ typedef struct {
 	unsigned use_ssl :1;
 } socket_t;
 
-static void *allocate(httpc_os_t *a, size_t sz) {
+static void *allocate(httpc_options_t *a, size_t sz) {
 	assert(a);
 	void *r = a->allocator(a->arena, NULL, 0, sz);
 	return r ? memset(r, 0, sz) : r;
 }
 
-static void deallocate(httpc_os_t *a, void *ptr) {
+static void deallocate(httpc_options_t *a, void *ptr) {
 	assert(a);
 	a->allocator(a->arena, ptr, 0, 0);
 }
 
-static int socket_close(socket_t *s, httpc_os_t *a) {
+static int socket_close(socket_t *s, httpc_options_t *a) {
 	assert(s);
 	if (!s)
 		return HTTPC_OK;
@@ -64,7 +64,7 @@ static int socket_close(socket_t *s, httpc_os_t *a) {
 	return r;
 }
 
-static int ssl_open(socket_t *s, httpc_os_t *a, const char *domain) {
+static int ssl_open(socket_t *s, httpc_options_t *a, const char *domain) {
 	assert(s);
 	assert(domain);
 	if (s->fd < 0)
@@ -141,7 +141,7 @@ int httpc_logger(void *logger, const char *fmt, va_list ap) {
 	return r;
 }
 
-int httpc_open(void **sock, httpc_os_t *a, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
+int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
 	assert(sock);
 	assert(a);
 	assert(host_or_ip);
@@ -209,7 +209,7 @@ int httpc_open(void **sock, httpc_os_t *a, void *opts, const char *host_or_ip, u
 	if (use_ssl) {
 		if (ssl_open(s, a, host_or_ip) < 0)
 			goto fail;
-	} 
+	}
 	*sock = s;
 	return HTTPC_OK;
 fail:
@@ -222,7 +222,7 @@ fail:
 	return HTTPC_ERROR;
 }
 
-int httpc_close(void *socket, httpc_os_t *a) {
+int httpc_close(void *socket, httpc_options_t *a) {
 	assert(a);
 	return socket_close(socket, a);
 }
