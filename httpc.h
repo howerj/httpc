@@ -4,6 +4,9 @@
  * Email:   howe.r.j.89@gmail.com */
 #ifndef HTTPC_H
 #define HTTPC_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stddef.h>
 #include <stdarg.h>
@@ -67,4 +70,7 @@ HTTPC_API extern int httpc_write(void *socket, const unsigned char *buf, size_t 
 HTTPC_API extern int httpc_sleep(unsigned long milliseconds);
 HTTPC_API extern int httpc_logger(void *logfile, const char *fmt, va_list ap);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

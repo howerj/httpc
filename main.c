@@ -1,3 +1,11 @@
+/* Project:    Embeddable HTTP 1.0/1.1 Client
+ * Author:     Richard James Howe
+ * License:    The Unlicense
+ * Email:      howe.r.j.89@gmail.com
+ * Repository: https://github.com/howerj/httpc 
+ *
+ * Example driver for library. */
+
 #include "httpc.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -155,8 +163,8 @@ Version:    %d.%d.%d\n\
 Flags:      %d\n\n\
 Options:\n\n\
 \t-o #\tset operation GET/HEAD/PUT/DELETE\n\
-\t-h\tprint help and exit\n\
-\t-t\trun the built in tests, returning failure status\n\
+\t-h\tprint help and exit successfully\n\
+\t-t\trun the built in tests, returning failure status (0 = pass)\n\
 \t-u URL\tset URL to use\n\
 \t-1 perform HTTP 1.0 request, not a HTTP 1.1 request\n\
 \t-v turn logging on\n\
@@ -171,21 +179,20 @@ enum { OP_GET, OP_HEAD, OP_PUT, OP_POST, OP_DELETE };
 
 static int operation(const char *s) {
 	assert(s);
-	if (!strcmp(s, "GET"))
-		return OP_GET;
-	if (!strcmp(s, "HEAD"))
-		return OP_HEAD;
-	if (!strcmp(s, "PUT"))
-		return OP_PUT;
-	if (!strcmp(s, "POST"))
-		return OP_POST;
-	if (!strcmp(s, "DELETE"))
-		return OP_DELETE;
+	static const char *os[] = {
+		[OP_GET]    = "GET",
+		[OP_HEAD]   = "HEAD",
+		[OP_PUT]    = "PUT",
+		[OP_POST]   = "POST",
+		[OP_DELETE] = "DELETE",
+	};
+	for (size_t i = 0; i < sizeof (os) / sizeof (os[0]); i++)
+		if (!strcmp(s, os[i]))
+			return i;
 	return -1;
 }
 
 int main(int argc, char **argv) {
-
 
 	binary(stdin);
 	binary(stdout);

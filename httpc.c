@@ -672,13 +672,13 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			if (h->response >= 300 && h->response < 399) {
 				if (h->redirects++ > HTTPC_REDIRECT_MAX)
 					return error(h, "redirect count exceed max (%u)", (unsigned)HTTPC_RETRY_COUNT);
-				size_t i = 0, j = 0;
-				for (i = fld->length; isspace(line[i]); i++)
+				size_t k = 0, j = 0;
+				for (k = fld->length; isspace(line[k]); k++)
 					;
-				j = i;
-				for (i = fld->length; !isspace(line[i]) && line[i]; i++)
+				j = k;
+				for (k = fld->length; !isspace(line[k]) && line[k]; k++)
 					;
-				line[i] = '\0';
+				line[k] = '\0';
 				if (httpc_parse_url(h, &line[j]) < 0)
 					return fatal(h, "redirect failed");
 				h->redirect = 1;
