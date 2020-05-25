@@ -182,6 +182,7 @@ int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_
 
 	if (p == NULL) {
 		freeaddrinfo(servinfo);
+		servinfo = NULL;
 		goto fail;
 	}
 
