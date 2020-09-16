@@ -11,7 +11,114 @@
 #include <windows.h>
 #include <Ws2tcpip.h>
 
+#ifndef USE_SSL
+#define USE_SSL (1)
+#endif
+
+#if USE_SSL != 0
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 #define UNUSED(X) ((void)(X))
+
+typedef struct {
+	void *ctx;
+	void *ssl;
+	int fd;
+	unsigned use_ssl :1;
+} socket_t;
+
+static void *allocate(httpc_options_t *a, size_t sz) {
+	assert(a);
+	void *r = a->allocator(a->arena, NULL, 0, sz);
+	return r ? memset(r, 0, sz) : r;
+}
+
+static void deallocate(httpc_options_t *a, void *ptr) {
+	assert(a);
+	a->allocator(a->arena, ptr, 0, 0);
+}
+
+static int socket_close(socket_t *s, httpc_options_t *a) {
+	assert(s);
+	if (!s)
+		return HTTPC_OK;
+	int r = HTTPC_OK;
+#if USE_SSL != 0
+	if (s->use_ssl) {
+		if (s->ssl)
+			SSL_free(s->ssl);
+		s->ssl = NULL;
+		if (s->ctx)
+			SSL_CTX_free(s->ctx);
+		s->ctx = NULL;
+	}
+#endif
+	if (s->fd >= 0)
+		r = closesocket(s->fd);
+	s->fd = -1;
+	deallocate(a, s);
+	return r;
+}
+
+static int ssl_open(socket_t *s, httpc_options_t *a, const char *domain) {
+	assert(s);
+	assert(domain);
+	if (s->fd < 0)
+		return HTTPC_ERROR;
+#if USE_SSL == 0
+	return HTTPC_ERROR;
+#else
+	const SSL_METHOD *method = TLS_client_method();
+	s->ctx = SSL_CTX_new(method);
+	if (!(s->ctx))
+		goto fail;
+
+	s->ssl = SSL_new(s->ctx);
+	if (!(s->ssl))
+		goto fail;
+
+	SSL_set_fd(s->ssl, s->fd);
+	if (SSL_connect(s->ssl) != 1)
+		goto fail;
+
+	if (SSL_set_tlsext_host_name(s->ssl, domain) != 1)
+		goto fail;
+#endif
+	return HTTPC_OK;
+fail:
+	socket_close(s, a);
+	return HTTPC_ERROR;
+}
+
+/* NB. read/write do not check if we can retry - too lazy atm to do so */
+static int ssl_read(socket_t *s, unsigned char *buf, size_t *length) {
+	assert(s);
+	assert(buf);
+	assert(length);
+#if USE_SSL == 0
+	return HTTPC_ERROR;
+#else
+	const size_t requested = *length;
+	*length = 0;
+	const int r = SSL_read(s->ssl, buf, requested);
+	if (r < 0)
+		return HTTPC_ERROR;
+	*length = r;
+	return HTTPC_OK;
+#endif
+}
+
+static int ssl_write(socket_t *s, const unsigned char *buf, size_t length) {
+	assert(s);
+	assert(buf);
+#if USE_SSL == 0
+	return HTTPC_ERROR;
+#else
+	return SSL_write(s->ssl, buf, length) <= 0 ? HTTPC_ERROR : HTTPC_OK;
+#endif
+}
 
 static void httpc_cleanup(void) {
 	(void)WSACleanup();
@@ -55,31 +162,40 @@ int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_
 	assert(host_or_ip);
 	UNUSED(opts);
 	UNUSED(a);
-	int sockfd = -1, rv = 0;
 	struct addrinfo *servinfo = NULL, *p = NULL;
        	struct addrinfo hints = {
 		.ai_family   = AF_UNSPEC,
 		.ai_socktype = SOCK_STREAM,
 	};
 
+	if (!USE_SSL && use_ssl)
+		return HTTPC_ERROR;
+
 	if (httpc_init() < 0)
 		return HTTPC_ERROR;
 
-	if (use_ssl)
+	socket_t *s = allocate(a, sizeof *s);
+	if (!s)
 		return HTTPC_ERROR;
+	s->use_ssl = use_ssl;
+	s->fd = -1;
+
 	port = port ? port : 80;
 
 	char sport[32] = { 0 };
 	snprintf(sport, sizeof sport, "%u", port);
-	if ((rv = getaddrinfo(host_or_ip, sport, &hints, &servinfo)) != 0)
+	const int rv = getaddrinfo(host_or_ip, sport, &hints, &servinfo);
+	if (rv != 0) {
+		socket_close(s, a);
 		return HTTPC_ERROR;
+	}
 
 	for(p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+		if ((s->fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
 			continue;
 		}
-		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-			closesocket(sockfd);
+		if (connect(s->fd, p->ai_addr, p->ai_addrlen) == -1) {
+			closesocket(s->fd);
 			continue;
 		}
 		break;
@@ -87,32 +203,44 @@ int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_
 
 	if (p == NULL) {
 		freeaddrinfo(servinfo);
+		socket_close(s, a);
 		return HTTPC_ERROR;
 	}
 
-	char s[INET6_ADDRSTRLEN] = { 0 };
-	if (NULL == inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), s, sizeof s)) {
-		(void)closesocket(sockfd);
+	char si[INET6_ADDRSTRLEN] = { 0 };
+	if (NULL == inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), si, sizeof si)) {
 		freeaddrinfo(servinfo);
+		socket_close(s, a);
 		return HTTPC_ERROR;
 	}
 
 	freeaddrinfo(servinfo);
-	*sock = (void*)(intptr_t)sockfd;
+
+	if (use_ssl) {
+		if (ssl_open(s, a, host_or_ip) < 0) {
+			socket_close(s, a);
+			return HTTPC_ERROR;
+		}
+	}
+
+	*sock = s;
 	return HTTPC_OK;
 }
 
 int httpc_close(void *socket, httpc_options_t *a) {
 	assert(a);
 	UNUSED(a);
-	return closesocket((intptr_t)socket) < 0 ? HTTPC_ERROR : HTTPC_OK;
+	return socket_close(socket, a);
 }
 
 int httpc_read(void *socket, unsigned char *buf, size_t *length) {
 	assert(length);
 	assert(buf);
+	socket_t *s = socket;
+	if (s->use_ssl)
+		return ssl_read(s, buf, length);
 	errno = 0;
-	const intptr_t fd = (intptr_t)socket;
+	const intptr_t fd = s->fd;
 	const ssize_t re = recv(fd, (char*)buf, *length, 0);
 	if (re == -1) {
 		*length = 0;
@@ -124,8 +252,11 @@ int httpc_read(void *socket, unsigned char *buf, size_t *length) {
 
 int httpc_write(void *socket, const unsigned char *buf, const size_t length) {
 	assert(buf);
+	socket_t *s = socket;
+	if (s->use_ssl)
+		return ssl_write(s, buf, length);
 	errno = 0;
-	const intptr_t fd = (intptr_t)socket;
+	const intptr_t fd = s->fd;
 	const ssize_t wr = send(fd, (const char *)buf, length, 0);
 	if ((size_t)wr != length || wr == -1)
 		return HTTPC_ERROR;

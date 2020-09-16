@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # HTTPC: HTTP Client Test Suite
 # Tests go here!
@@ -10,13 +10,11 @@
 NC=nc
 LOCAL=127.0.0.1
 
-set -x
-set -e
-set -u
+set -eux
 make httpc
 ./httpc -t
 
-EX1=$(cat <<'EOF'
+EX1=$(cat <<EOF
 HTTP/1.1 200 OK 
 Content-Type: text/plain 
 Transfer-Encoding: chunked
@@ -36,22 +34,24 @@ E
 
 chunks.
 0
-EOF 
-)
+EOF
+);
 
-EX2=$(cat <<'EOF'
+EX2=$(cat <<EOF
 HTTP/1.1 301 Moved Permanently
 Location: 127.0.0.1:8080
 
 EOF
 );
 
-echo "${EX1}" | unix2dos | ${NC} -l -p 8080 &
+echo "${EX1}" | unix2dos | "${NC}" -vv -l -p 8080 &
 p1=$!
-echo "${EX2}" | unix2dos | "${NC}" -l -p 8081 &
+sleep 1
+echo "${EX2}" | unix2dos | "${NC}" -vv -l -p 8081 &
 p2=$!
+sleep 1
 
-./httpc "${LOCAL}:8081"
+./httpc -v "${LOCAL}:8081"
 
 kill -9 ${p1} || true;
 kill -9 ${p2} || true;

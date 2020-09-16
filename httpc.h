@@ -61,8 +61,8 @@ HTTPC_API int httpc_head(httpc_options_t *a, const char *url);
 HTTPC_API int httpc_delete(httpc_options_t *a, const char *url);
 HTTPC_API int httpc_tests(httpc_options_t *a);
 
-/* you provide these functions and populate 'httpc_options_t' with them - return
- * negative on failure, zero on success. */
+/* you provide these functions and populate 'httpc_options_t' with them when porting
+ * to a new platform (ie. Not Unix or Windows) - return negative on failure, zero on success. */
 HTTPC_API extern int httpc_open(void **socket, httpc_options_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
 HTTPC_API extern int httpc_close(void *socket, httpc_options_t *a);
 HTTPC_API extern int httpc_read(void *socket, unsigned char *buf, size_t *length);

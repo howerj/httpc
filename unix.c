@@ -152,14 +152,14 @@ int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_
 		.ai_socktype = SOCK_STREAM,
 	};
 
+	if (!USE_SSL && use_ssl)
+		return HTTPC_ERROR;
+
 	socket_t *s = allocate(a, sizeof *s);
 	if (!s)
 		return HTTPC_ERROR;
 	s->use_ssl = use_ssl;
 	s->fd = -1;
-
-	if (!USE_SSL && use_ssl)
-		return HTTPC_ERROR;
 
 	port = port ? port : 80;
 

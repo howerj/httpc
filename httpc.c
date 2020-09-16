@@ -31,16 +31,12 @@
 #define HTTPC_CONNECTION_ATTEMPTS (3u)
 #endif
 
-#ifndef HTTPC_RETRY_COUNT
-#define HTTPC_RETRY_COUNT (3u)
-#endif
-
 #ifndef HTTPC_REDIRECT_MAX
 #define HTTPC_REDIRECT_MAX (3u)
 #endif
 
 #ifndef HTTPC_MAX_HEADER /* maximum size for the header; 0 == infinite length allowed */
-#define HTTPC_MAX_HEADER (4096ul)
+#define HTTPC_MAX_HEADER (8192ul)
 #endif
 
 #define USED(X)                 ((void)(X)) /* warning suppression: variable is used conditionally */
@@ -68,11 +64,11 @@ struct httpc {
 	/* These strings point into 'url', which has been modified from the
 	 * original URL to contain a bunch of NUL terminated strings where the
 	 * delimiters were */
-	char *domain /* or IPv4/IPv6 */, *userpass, *path;
+	char *domain /* or IPv4/IPv6 */, *userpass, *path, *url;
 	void *socket;
-	char *url;
 	length_t position, length, max;
 	unsigned retries, redirects; /* retry count, redirect count */
+	unsigned retries_max, redirects_max;
 	unsigned response, v1, v2; /* HTTP response, HTTP version (1.0 or 1.1) */
 	unsigned short port;
 	unsigned use_ssl       :1, /* if set then SSL should be used on the connection */
@@ -206,10 +202,12 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 
 #if HTTPC_LOGGING == 0
 static inline int code(const int code) { return code; } /* suppresses warnings */
+#define debug(H, ...) (code(HTTPC_OK))
 #define info(H, ...)  (code(HTTPC_OK))
 #define error(H, ...) (code(HTTPC_ERROR))
 #define fatal(H, ...) (httpc_kill((H)))
 #else
+#define debug(H, ...) httpc_log_line((H), "debug", 0, HTTPC_OK,    __LINE__, __VA_ARGS__)
 #define info(H, ...)  httpc_log_line((H), "info",  0, HTTPC_OK,    __LINE__, __VA_ARGS__)
 #define error(H, ...) httpc_log_line((H), "error", 0, HTTPC_ERROR, __LINE__, __VA_ARGS__)
 #define fatal(H, ...) httpc_log_line((H), "fatal", 1, HTTPC_ERROR, __LINE__, __VA_ARGS__)
@@ -218,6 +216,7 @@ static inline int code(const int code) { return code; } /* suppresses warnings *
 static void *httpc_malloc(httpc_t *h, const size_t size) {
 	assert(h);
 	assert(h->os.allocator);
+	debug(h, "allocate %ld bytes", (long)size);
 	if (httpc_dead(h))
 		return NULL;
 	void *r = h->os.allocator(h->os.arena, NULL, 0, size);
@@ -479,10 +478,10 @@ static int httpc_request_send_header(httpc_t *h, int op) {
 	const char *operation = op_to_str(op);
 	if (!operation)
 		return fatal(h, "unknown operation '%d'", op);
-	/* NB. We could perform some small program optimization on this by
+	/* TODO: We could perform some small program optimization on this by
 	 * allocating on the stack then moving to heap when the size gets
 	 * too big. */
-	buffer_t *b = buffer(h, 1024);
+	buffer_t *b = buffer(h, HTTPC_STACK_BUFFER_SIZE);
 	if (!b)
 		return HTTPC_ERROR;
 
@@ -573,14 +572,14 @@ fail:
 }
 
 static int httpc_backoff(httpc_t *h) {
-	/* instead of 5000ms, we could use the round trip time
+	/* instead of Xms, we could use the round trip time
 	 * as estimated by the connection time as an initial guess as
 	 * per RFC 2616 */
 	if (httpc_dead(h))
 		return HTTPC_ERROR;
-	const unsigned long backoff = 5000ul * (1ul << h->retries);
-	const unsigned long limited = MIN(1000ul * 60ul * 1ul, backoff);
-	info(h, "backing off for %lu ms", limited);
+	const unsigned long backoff = 500ul * (1ul << h->retries);
+	const unsigned long limited = MIN(1000ul * 10ul * 1ul, backoff);
+	info(h, "backing off for %lu ms, retried %u", limited, (h->retries));
 	return h->os.sleep(limited);
 }
 
@@ -670,8 +669,8 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			return info(h, "Content Length: %lu", (unsigned long)h->length);
 		case FLD_REDIRECT:
 			if (h->response >= 300 && h->response < 399) {
-				if (h->redirects++ > HTTPC_REDIRECT_MAX)
-					return error(h, "redirect count exceed max (%u)", (unsigned)HTTPC_RETRY_COUNT);
+				if (h->redirects++ > h->redirects_max)
+					return error(h, "redirect count exceed max (%u)", (unsigned)h->redirects_max);
 				size_t k = 0, j = 0;
 				for (k = fld->length; isspace(line[k]); k++)
 					;
@@ -863,18 +862,16 @@ static int httpc_parse_response_body_chunked(httpc_t *h) {
 		if (length == 0)
 			return info(h, "chunked done done");
 
-		for (size_t i = 0; i < length; i += HTTPC_STACK_BUFFER_SIZE) {
+		for (size_t i = 0, l = 0; i < length; i += l) {
 			unsigned char buf[HTTPC_STACK_BUFFER_SIZE];
 			BUILD_BUG_ON(sizeof buf != HTTPC_STACK_BUFFER_SIZE);
 			const size_t requested = MIN(sizeof (buf), length - i);
-			size_t l = requested;
+			l = requested;
 			if (h->os.read(h->socket, buf, &l) < 0)
 				return error(h, "read failed");
-			if (l != requested)
-				return error(h, "read - got less than requested");
-			if (httpc_execute_callback(h, buf, requested) < 0)
+			if (httpc_execute_callback(h, buf, l) < 0)
 				return HTTPC_ERROR;
-			h->position += requested;
+			h->position += l;
 			h->max = MAX(h->max, h->position);
 		}
 		nl = 2;
@@ -955,13 +952,14 @@ static int httpc_generate_request_body(httpc_t *h) {
 	return info(h, "body generated");
 }
 
-static inline void banner(httpc_t *h) {
+static inline int banner(httpc_t *h) {
 	assert(h);
 	USED(h);
 	unsigned long version = 0;
 	httpc_version(&version);
 	const unsigned z = version & 0xff, y = (version >> 8) & 0xff, x = (version >> 16) & 0xff;
 	const unsigned opt = (version >> 24) & 0xff;
+	/* warning suppression if HTTPC_LOGGING == 0 */
 	USED(version);
 	USED(x);
 	USED(y);
@@ -972,20 +970,25 @@ static inline void banner(httpc_t *h) {
 	info(h, "Repo:    https://github.com/howerj/httpc");
 	info(h, "Author:  Richard James Howe");
 	info(h, "Email:   howe.r.j.89@gmail.com");
-	info(h, "License: The Unlicense");
+	return info(h, "License: The Unlicense");
 }
 
 static int httpc_op(httpc_t *h, const char *url, int op) {
 	assert(h);
 	assert(url);
 	int r = HTTPC_OK, open = 0;
+	if (banner(h) < 0)
+		return HTTPC_ERROR;
 
-	banner(h);
+	if (h->retries_max == 0)
+		h->retries_max = HTTPC_CONNECTION_ATTEMPTS;
+	if (h->redirects_max == 0)
+		h->retries_max = HTTPC_REDIRECT_MAX;
 
 	if (httpc_parse_url(h, url) < 0)
 		return HTTPC_ERROR;
 
-	for (; h->retries < HTTPC_CONNECTION_ATTEMPTS; h->retries++) {
+	for (; h->retries < h->retries_max; h->retries++) {
 		if (httpc_dead(h))
 			return fatal(h, "cannot continue quitting");
 		if (h->os.open(&h->socket, &h->os, h->os.socketopts, h->domain, h->port, h->use_ssl) == HTTPC_OK) {
@@ -1013,8 +1016,12 @@ static int httpc_op(httpc_t *h, const char *url, int op) {
 			}
 
 			if (op == HTTPC_GET) {
-				if (httpc_parse_response_body(h) < 0)
+				const length_t pos = h->position;
+				if (httpc_parse_response_body(h) < 0) {
+					if (pos < h->position) {
+					}
 					goto backoff;
+				}
 			}
 			break;
 		}

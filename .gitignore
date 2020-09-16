@@ -3,6 +3,8 @@
 *.bin
 *.dll
 *.exe
+*.htm
+*.html
 *.o
 *.so
 *.tgz

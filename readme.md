@@ -97,15 +97,15 @@ pretty much every Unix program ever.
 
 This program is licensed under the [The Unlicense][], do what thou wilt.
 
-# BUGS
+# LIMITATIONS
 
-Known issues include:
+Known limitations include:
 
 * A line in the HTTP header must be smaller than 512 bytes in size (with the
   default configuration) otherwise parsing the header will fail.
 * File sizes are probably limited up to 2GiB on many platforms.
-* The project is currently in alpha, there are likely to be many problems and
-  things not implemented.
+
+# BUGS
 
 For any bugs please contact the author at <mailto:howe.r.j.89@gmail.com>.
 Please include as much information as possible including, but not limited to:
@@ -118,28 +118,19 @@ case, thoughts, comments and general rants.
 The following a list of outstanding features and ideas for the project, they
 may or may not be implemented.
 
-* [x] Get basic functionality sorted
-* [x] Handle partially downloaded files correctly
+* [ ] Change the C API so callbacks are passed in and the OS routines are
+  not part of the library?
+* [ ] Improve this 'readme.md' file so it looks better as a manual page.
 * [ ] Make the library non-blocking, that is it should be able to resume
-  if a open, close, read or write on a socket would block. This is more
-  difficult that it first seems. Perhaps the line number could be used as
-  a way of storing state...
-* [ ] Add a HTTPS version of the open/close functions
-  - [x] On Linux/Unixen
-  - [ ] On Windows
-* [ ] This project could be extended to support other, small, Internet related
-  protocols that are useful in an embedded context and are also simple to
-  implement, such as [ntp][] and [dns][] clients. NTP and DNS are both needed
-  to implement the full HTTP(S) stack.
+  if a open, close, read or write on a socket would block.
 * [ ] Be more liberal in what we accept to allow a slightly misbehaving server
   to still serve us files. This can be done by:
    - Allowing Unix line termination to be used instead of the proper line
      termination, but still accepting both.
-   - By making all comparisons on text fields case insensitive (ASCII only).
 * [ ] Perform optimizations on code
   - [ ] Reduce number of logging format strings
   - [ ] Allocate small buffers on the stack, then move to heap if needed
-    amount becomes too big.
+    amount becomes too big, and reduce the number of allocations in general.
 * [ ] Add more assertions
   - Pre and post conditions
   - Assert buffer indices within bounds
