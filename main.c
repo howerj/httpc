@@ -111,11 +111,6 @@ static void *httpc_allocator(void *arena, void *ptr, const size_t oldsz, const s
 	return ptr;
 }
 
-/* NOTE: The way the callback mechanism works, the callback has to keep track
- * of the position, we should probably do that in the library instead,
- * discarding everything until we get back to where we are. Also bear in mind
- * even if "position < d->position", "position + length" could be greater than
- * "d->position". */
 static int httpc_dump_cb(void *param, unsigned char *buf, size_t length, size_t position) {
 	assert(param);
 	assert(buf);
@@ -147,7 +142,7 @@ static int help(FILE *out, const char *arg0) {
 	unsigned long version = 0;
 	const int r = httpc_version(&version);
 	if (r < 0)
-		(void)fprintf(stderr, "build incorrectly - unset version number");
+		(void)fprintf(stderr, "built incorrectly - unset version number");
 	const int q = (version >> 24) & 0xFFu;
 	const int x = (version >> 16) & 0xFFu;
 	const int y = (version >>  8) & 0xFFu;
@@ -239,7 +234,7 @@ int main(int argc, char **argv) {
 	case OP_DELETE: return httpc_delete(&a, url) != HTTPC_OK ? 1 : 0;
 	case OP_POST:
 	default:
-		fprintf(stderr, "operation unimplemented\n");
+		(void)fprintf(stderr, "operation unimplemented\n");
 		return 1;
 	}
 	return 0;

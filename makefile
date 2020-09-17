@@ -1,6 +1,6 @@
-VERSION=0x010000ul
+VERSION=0x010001ul
 STD=c99
-CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -pedantic -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="${VERSION}"
+CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="${VERSION}"
 TARGET=httpc
 AR      = ar
 ARFLAGS = rcs
@@ -8,11 +8,13 @@ DESTDIR = install
 USE_SSL =1
 
 ifeq ($(OS),Windows_NT)
+EXE=.exe
 DLL=dll
 PLATFORM=win
 LDLIBS= -lWs2_32
 DLLIBS=
 else # Assume Unixen
+EXE=
 DLL=so
 PLATFORM=unix
 DLLIBS=
@@ -49,7 +51,7 @@ lib${TARGET}.${DLL}: ${TARGET}.o ${TARGET}.h
 
 ${TARGET}: main.o lib${TARGET}.a
 	${CC} ${CFLAGS} $^ ${LDLIBS} -o $@
-	-strip $@
+	-strip $@${EXE}
 
 ${TARGET}.1: readme.md
 	-pandoc -s -f markdown -t man $< -o $@

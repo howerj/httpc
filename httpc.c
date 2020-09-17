@@ -761,7 +761,7 @@ static int httpc_parse_response_header(httpc_t *h) {
 	if (httpc_dead(h))
 		return HTTPC_ERROR;
 	char ok[128] = { 0 };
-	unsigned char line[HTTPC_STACK_BUFFER_SIZE] = { 0 };
+	unsigned char line[HTTPC_STACK_BUFFER_SIZE] = { 0 }; /* TODO: Reuse request buffer? */
 	size_t length = 0, hlen = 0;
 	h->v1 = 0;
 	h->v2 = 0;
@@ -806,10 +806,8 @@ static int httpc_execute_callback(httpc_t *h, const unsigned char *buf, const si
 	assert(buf);
 	if (h->fn == NULL) /* null operation */
 		return HTTPC_OK;
-
 	if ((h->position + length) < h->max) /* discard previous data run */
 		return HTTPC_OK;
-
 	const size_t diff = (h->position + length) - h->max;
 	assert(diff <= length);
 	if (h->fn(h->fn_param, (unsigned char*)buf, diff, h->max) < 0)
@@ -849,7 +847,7 @@ static int httpc_parse_response_body_chunked(httpc_t *h) {
 		return HTTPC_ERROR;
 
 	for (;;) {
-		unsigned char n[64+1] = { 0 };
+		unsigned char n[64+1] = { 0, };
 		size_t nl = sizeof n;
 		if (httpc_read_until_line_end(h, n, &nl) < 0) {
 			if (h->length_set && h->length == 0)
@@ -860,7 +858,7 @@ static int httpc_parse_response_body_chunked(httpc_t *h) {
 		if (str_to_num((char*)n, &length, sizeof (n) - 1, 16) < 0)
 			return error(h, "number format error: %s", n);
 		if (length == 0)
-			return info(h, "chunked done done");
+			return info(h, "chunked done");
 
 		for (size_t i = 0, l = 0; i < length; i += l) {
 			unsigned char buf[HTTPC_STACK_BUFFER_SIZE];
@@ -976,19 +974,17 @@ static inline int banner(httpc_t *h) {
 static int httpc_op(httpc_t *h, const char *url, int op) {
 	assert(h);
 	assert(url);
-	int r = HTTPC_OK, open = 0;
+	int r = HTTPC_OK, open = 0, progress = 0;
 	if (banner(h) < 0)
 		return HTTPC_ERROR;
-
 	if (h->retries_max == 0)
 		h->retries_max = HTTPC_CONNECTION_ATTEMPTS;
 	if (h->redirects_max == 0)
 		h->retries_max = HTTPC_REDIRECT_MAX;
-
 	if (httpc_parse_url(h, url) < 0)
 		return HTTPC_ERROR;
 
-	for (; h->retries < h->retries_max; h->retries++) {
+	for (; h->retries < h->retries_max; h->retries += !progress) {
 		if (httpc_dead(h))
 			return fatal(h, "cannot continue quitting");
 		if (h->os.open(&h->socket, &h->os, h->os.socketopts, h->domain, h->port, h->use_ssl) == HTTPC_OK) {
@@ -1017,9 +1013,9 @@ static int httpc_op(httpc_t *h, const char *url, int op) {
 
 			if (op == HTTPC_GET) {
 				const length_t pos = h->position;
+				progress = 0;
 				if (httpc_parse_response_body(h) < 0) {
-					if (pos < h->position) {
-					}
+					progress = pos < h->position; /* we have processed some data...*/
 					goto backoff;
 				}
 			}
@@ -1128,7 +1124,7 @@ static inline int httpc_testing_sleep(unsigned long milliseconds) {
 
 typedef struct {
 	httpc_t *h;
-	unsigned char *buffer;
+	const char *buffer;
 	size_t length, position;
 } testing_t;
 
@@ -1141,7 +1137,7 @@ static inline int httpc_testing_open(void **socket, httpc_options_t *a, void *op
 	UNUSED(use_ssl);
 	httpc_t *h = opts;
 
-	struct sites {
+	static const struct sites {
 		char *domain;
 		char *file;
 	} files[] = {
@@ -1175,8 +1171,8 @@ static inline int httpc_testing_open(void **socket, httpc_options_t *a, void *op
 			if (!t)
 				return fatal(h, "unable to malloc");
 			t->h = h;
-			t->buffer = (unsigned char*) files[i].file;
-			t->length = strlen((char*) t->buffer);
+			t->buffer = files[i].file;
+			t->length = strlen(t->buffer);
 			t->position = 0;
 			*socket = t;
 			return HTTPC_OK;
@@ -1216,7 +1212,6 @@ static inline int httpc_testing_write(void *socket, const unsigned char *buf, si
 	return HTTPC_OK; /* discard for now */
 }
 
-/* TODO: Test failure cases as well as passes */
 int httpc_tests(httpc_options_t *a) {
 	assert(a);
 	BUILD_BUG_ON(HTTPC_STACK_BUFFER_SIZE < 128ul);
@@ -1232,51 +1227,56 @@ int httpc_tests(httpc_options_t *a) {
 	a->write = httpc_testing_write;
 	a->sleep = httpc_testing_sleep;
 
-	typedef struct {
+	static const struct url_test {
 		char *url;
 		char *domain /* or IPv4/IPv6 */, *userpass, *path;
 		unsigned short port;
-		int use_ssl;
-	} url_tests_t;
-
-	static const url_tests_t ut[] = {
-		{ .url = "example.com",                                  .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 80,  .use_ssl = 0 },
-		{ .url = "user:password@example.com",                    .domain = "example.com", .userpass = "user:password", .path = "/",           .port = 80,  .use_ssl = 0 },
-		{ .url = "user:password@example.com:666",                .domain = "example.com", .userpass = "user:password", .path = "/",           .port = 666, .use_ssl = 0 },
-		{ .url = "http://example.com",                           .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 80,  .use_ssl = 0 },
-		{ .url = "https://example.com",                          .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 443, .use_ssl = 1 },
-		{ .url = "https://example.com:666",                      .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 666, .use_ssl = 1 },
-		{ .url = "https://example.com:666/",                     .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 666, .use_ssl = 1 },
-		{ .url = "https://example.com:666/index.html",           .domain = "example.com", .userpass = NULL,            .path = "/index.html", .port = 666, .use_ssl = 1 },
-		{ .url = "https://example.com/",                         .domain = "example.com", .userpass = NULL,            .path = "/",           .port = 443, .use_ssl = 1 },
-		{ .url = "https://example.com/index.html",               .domain = "example.com", .userpass = NULL,            .path = "/index.html", .port = 443, .use_ssl = 1 },
-		{ .url = "https://user:password@example.com/index.html", .domain = "example.com", .userpass = "user:password", .path = "/index.html", .port = 443, .use_ssl = 1 },
+		int use_ssl, error;
+	} url_tests[] = {
+		{ .url = "example.com",                                  .domain = "example.com",   .userpass = NULL,            .path = "/",           .port = 80,  .use_ssl = 0, .error = 0, },
+		{ .url = "example.co.uk",                                .domain = "example.co.uk", .userpass = NULL,            .path = "/",           .port = 80,  .use_ssl = 0, .error = 0, },
+		{ .url = "user:password@example.com",                    .domain = "example.com",   .userpass = "user:password", .path = "/",           .port = 80,  .use_ssl = 0, .error = 0, },
+		{ .url = "user:password@example.com:666",                .domain = "example.com",   .userpass = "user:password", .path = "/",           .port = 666, .use_ssl = 0, .error = 0, },
+		{ .url = "http://example.com",                           .domain = "example.com",   .userpass = NULL,            .path = "/",           .port = 80,  .use_ssl = 0, .error = 0, },
+		{ .url = "https://example.com",                          .domain = "example.com",   .userpass = NULL,            .path = "/",           .port = 443, .use_ssl = 1, .error = 0, },
+		{ .url = "https://example.com:666",                      .domain = "example.com",   .userpass = NULL,            .path = "/",           .port = 666, .use_ssl = 1, .error = 0, },
+		{ .url = "https://example.com:666/",                     .domain = "example.com",   .userpass = NULL,            .path = "/",           .port = 666, .use_ssl = 1, .error = 0, },
+		{ .url = "https://example.com:666/index.html",           .domain = "example.com",   .userpass = NULL,            .path = "/index.html", .port = 666, .use_ssl = 1, .error = 0, },
+		{ .url = "https://example.com/",                         .domain = "example.com",   .userpass = NULL,            .path = "/",           .port = 443, .use_ssl = 1, .error = 0, },
+		{ .url = "https://example.com/index.html",               .domain = "example.com",   .userpass = NULL,            .path = "/index.html", .port = 443, .use_ssl = 1, .error = 0, },
+		{ .url = "https://user:password@example.com/index.html", .domain = "example.com",   .userpass = "user:password", .path = "/index.html", .port = 443, .use_ssl = 1, .error = 0, },
+		{ .url = "",                                             .domain = "",              .userpass = "",              .path = "",            .port = 0,   .use_ssl = 0, .error = 1, },
+		{ .url = "https://user@password:example.com/index.html", .domain = "",              .userpass = "",              .path = "",            .port = 0,   .use_ssl = 0, .error = 1, },
 	};
 
+	/* TODO: Check for memory leaks in failure cases */
 	int r = HTTPC_OK;
-	const size_t utl = sizeof (ut) / sizeof (ut[0]);
-	for (size_t i = 0; i < utl; i++) {
+	const size_t url_tests_count = sizeof (url_tests) / sizeof (url_tests[0]);
+	for (size_t i = 0; i < url_tests_count; i++) {
 		httpc_t h = { .os = *a, };
 
-		const url_tests_t *u = &ut[i];
+		const struct url_test *u = &url_tests[i];
 		info(&h, "URL:       %s", u->url);
-		if (httpc_parse_url(&h, u->url) < 0) {
-			r = error(&h, "HTTP URL parsing failed");
+		const int rp = httpc_parse_url(&h, u->url);
+		if (rp < 0) {
+			if (u->error == 0)
+				r = error(&h, "HTTP URL parsing failed");
+			else
+				info(&h, "expected and got an error");
 			continue;
 		}
-
+		if (u->error) {
+			r = error(&h, "expected an error and got none");
+			continue;
+		}
 		if (strcmp(u->path, h.path))
 			r = error(&h, "path mismatch:   '%s' != '%s'", u->path, h.path);
-
 		if (strcmp(u->domain, h.domain))
 			r = error(&h, "domain mismatch: '%s' != '%s'", u->domain, h.domain);
-
 		if (u->port != h.port)
 			r = error(&h, "port mismatch:   '%u' != '%u'", (unsigned) u->port, (unsigned) h.port);
-
 		if (u->use_ssl != h.use_ssl)
 			r = error(&h, "SSL mismatch:    '%u' != '%u'", (unsigned) u->use_ssl, (unsigned) h.use_ssl);
-
 		if (u->userpass) {
 			if (h.userpass == NULL) {
 				r = error(&h, "user-pass mismatch: '%s' != NULL", u->userpass);
@@ -1290,21 +1290,25 @@ int httpc_tests(httpc_options_t *a) {
 		h.url = NULL;
 	}
 
-	static const char *files[] = {
-		"example.com",
-		"identity.com",
-		"redirect.com",
+	static const struct file_test {
+		const char *file;
+		int error;
+	} file_tests[] = {
+		{ "example.com",   0, },
+		{ "identity.com",  0, },
+		{ "redirect.com",  0, },
+		/* TODO: Test failure cases */
 	};
-	const size_t files_count = sizeof (files) / sizeof (files[0]);
-	for (size_t i = 0; i < files_count; i++) {
+	const size_t file_tests_count = sizeof (file_tests) / sizeof (file_tests[0]);
+	for (size_t i = 0; i < file_tests_count; i++) {
+		const struct file_test *ft = &file_tests[i];
 		httpc_t h = { .os = *a, };
 		a->socketopts = &h;
-		info(&h, "Test GET on URL '%s'", files[i]);
-		if (httpc_get(a, files[i], NULL, NULL) < 0)
-			r = error(&h, "Test GET on URL '%s' failed", files[i]);
+		info(&h, "Test GET on URL '%s'", ft->file);
+		if (httpc_get(a, ft->file, NULL, NULL) < 0)
+			r = error(&h, "Test GET on URL '%s' failed", ft->file);
 		a->socketopts = NULL;
 	}
-
 	return r;
 }
 

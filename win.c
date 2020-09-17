@@ -64,6 +64,8 @@ static int socket_close(socket_t *s, httpc_options_t *a) {
 
 static int ssl_open(socket_t *s, httpc_options_t *a, const char *domain) {
 	assert(s);
+	assert(a);
+	UNUSED(a);
 	assert(domain);
 	if (s->fd < 0)
 		return HTTPC_ERROR;
@@ -80,15 +82,16 @@ static int ssl_open(socket_t *s, httpc_options_t *a, const char *domain) {
 		goto fail;
 
 	SSL_set_fd(s->ssl, s->fd);
-	if (SSL_connect(s->ssl) != 1)
-		goto fail;
 
 	if (SSL_set_tlsext_host_name(s->ssl, domain) != 1)
+		goto fail;
+
+	/* Better error logging could be done here... */
+	if (SSL_connect(s->ssl) != 1)
 		goto fail;
 #endif
 	return HTTPC_OK;
 fail:
-	socket_close(s, a);
 	return HTTPC_ERROR;
 }
 
