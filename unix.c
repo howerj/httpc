@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <time.h>
 /*#include <netinet/tcp.h> // Not portable, needed for keepalive */
 
 #ifndef USE_SSL
@@ -274,5 +275,15 @@ again:
 
 int httpc_sleep(unsigned long milliseconds) {
 	return usleep(milliseconds * 1000ul) < 0 ? HTTPC_ERROR : HTTPC_OK;
+}
+
+int httpc_time(unsigned long *milliseconds) {
+	assert(milliseconds);
+	*milliseconds = 0;
+	struct timespec t;
+	if (clock_gettime(CLOCK_REALTIME, &t) < 0)
+		return HTTPC_ERROR;
+    	*milliseconds = t.tv_sec * 1000ul;
+	return HTTPC_ERROR;
 }
 

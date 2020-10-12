@@ -43,7 +43,7 @@ static int httpc_getopt(httpc_getopt_t *opt, const int argc, char *const argv[],
 	assert(opt);
 	assert(fmt);
 	assert(argv);
-	enum { BADARG_E = ':', BADCH_E = '?' };
+	enum { BADARG_E = ':', BADCH_E = '?', };
 
 	if (!(opt->init)) {
 		opt->place = ""; /* option letter processing */
@@ -139,14 +139,6 @@ static int httpc_put_cb(void *param, unsigned char *buf, size_t length, size_t p
 static int help(FILE *out, const char *arg0) {
 	assert(out);
 	assert(arg0);
-	unsigned long version = 0;
-	const int r = httpc_version(&version);
-	if (r < 0)
-		(void)fprintf(stderr, "built incorrectly - unset version number");
-	const int q = (version >> 24) & 0xFFu;
-	const int x = (version >> 16) & 0xFFu;
-	const int y = (version >>  8) & 0xFFu;
-	const int z = (version >>  0) & 0xFFu;
 	const char *fmt = "\
 Usage:      %s -[ht1v] -u www.example.com/index.html\n\n\
 Project:    Embeddable HTTP(S) Client\n\
@@ -154,8 +146,7 @@ Author:     Richard James Howe\n\
 Email:      <mailto:howe.r.j.89@gmail.com>\n\
 License:    The Unlicense\n\
 Repository: <https://github.com/howerj/httpc>\n\
-Version:    %d.%d.%d\n\
-Flags:      %d\n\n\
+Version:    %s\n\
 Options:\n\n\
 \t-o #\tset operation GET/HEAD/PUT/DELETE\n\
 \t-h\tprint help and exit successfully\n\
@@ -167,19 +158,21 @@ Options:\n\n\
 \n\
 Returns non zero value on failure. stdin(3) for input, stdout(3)\n\
 for output, and stderr(3) for logging\n\n";
-	return fprintf(out, fmt, arg0, x, y, z, q);
+	return fprintf(out, fmt, arg0, VERSION);
 }
 
-enum { OP_GET, OP_HEAD, OP_PUT, OP_POST, OP_DELETE };
+enum { OP_GET, OP_HEAD, OP_PUT, OP_POST, OP_DELETE, OP_TRACE, OP_OPTIONS, };
 
 static int operation(const char *s) {
 	assert(s);
 	static const char *os[] = {
-		[OP_GET]    = "GET",
-		[OP_HEAD]   = "HEAD",
-		[OP_PUT]    = "PUT",
-		[OP_POST]   = "POST",
-		[OP_DELETE] = "DELETE",
+		[OP_GET]     = "GET",
+		[OP_HEAD]    = "HEAD",
+		[OP_PUT]     = "PUT",
+		[OP_POST]    = "POST",
+		[OP_DELETE]  = "DELETE",
+		[OP_TRACE]   = "TRACE",
+		[OP_OPTIONS] = "OPTIONS",
 	};
 	for (size_t i = 0; i < sizeof (os) / sizeof (os[0]); i++)
 		if (!strcmp(s, os[i]))
@@ -200,6 +193,7 @@ int main(int argc, char **argv) {
 		.read       = httpc_read,
 		.write      = httpc_write,
 		.sleep      = httpc_sleep,
+		.time       = httpc_time,
 		.logger     = httpc_logger,
 		.arena      = NULL,
 		.socketopts = NULL,
@@ -226,13 +220,15 @@ int main(int argc, char **argv) {
 		}
 		url = argv[opt.index++];
 	}
-	httpc_dump_t d = { .position = 0, .output = stdout };
+	httpc_dump_t d = { .position = 0, .output = stdout, };
 	switch (op) {
-	case OP_GET:    return httpc_get(&a, url, httpc_dump_cb, &d) != HTTPC_OK ? 1 : 0;
-	case OP_HEAD:   return httpc_head(&a, url) != HTTPC_OK ? 1 : 0;
-	case OP_PUT:    return httpc_put(&a, url, httpc_put_cb, stdin) != HTTPC_OK ? 1 : 0;
-	case OP_DELETE: return httpc_delete(&a, url) != HTTPC_OK ? 1 : 0;
-	case OP_POST:
+	case OP_GET:     return !!httpc_get(&a, url, httpc_dump_cb, &d);
+	case OP_HEAD:    return !!httpc_head(&a, url);
+	case OP_PUT:     return !!httpc_put(&a, url, httpc_put_cb, stdin);
+	case OP_DELETE:  return !!httpc_delete(&a, url);
+	case OP_POST:    return !!httpc_post(&a, url, httpc_put_cb, stdin);
+	case OP_TRACE:   return !!httpc_trace(&a, url);
+	case OP_OPTIONS: return !!httpc_options(&a, url);
 	default:
 		(void)fprintf(stderr, "operation unimplemented\n");
 		return 1;

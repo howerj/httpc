@@ -104,6 +104,17 @@ Known limitations include:
 * A line in the HTTP header must be smaller than 512 bytes in size (with the
   default configuration) otherwise parsing the header will fail.
 * File sizes are probably limited up to 2GiB on many platforms.
+* This library blocks, and a non-blocking version is not likely to be
+  developed as it would increase the code complexity too much. See
+  <https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html> for more
+  information about coroutines and C, which would solve this problem, or at
+  least create new ones.
+* The library is quite thirsty for stack size for a library meant to be run on
+  an embedded microcontroller. It will require at least 1-2KiB of stack, and
+  possibly more depending on how your callbacks are written.
+* The client is more liberal in what it will accept from the server than it
+  should be, allowing newlines to be terminated by a single CR with no LF, and
+  comparisons are done in a case-insensitive manner.
 
 # BUGS
 
@@ -112,36 +123,6 @@ Please include as much information as possible including, but not limited to:
 information on what platform you are compiling your code on (OS, 32/64-bit,
 ...), tracing information (for example, valgrind output), a minimal test 
 case, thoughts, comments and general rants.
-
-# TO DO
-
-The following a list of outstanding features and ideas for the project, they
-may or may not be implemented.
-
-* [ ] Change the C API so callbacks are passed in and the OS routines are
-  not part of the library?
-* [ ] Improve this 'readme.md' file so it looks better as a manual page.
-* [ ] Make the library non-blocking, that is it should be able to resume
-  if a open, close, read or write on a socket would block.
-* [ ] Be more liberal in what we accept to allow a slightly misbehaving server
-  to still serve us files. This can be done by:
-   - Allowing Unix line termination to be used instead of the proper line
-     termination, but still accepting both.
-* [ ] Perform optimizations on code
-  - [ ] Reduce number of logging format strings
-  - [ ] Allocate small buffers on the stack, then move to heap if needed
-    amount becomes too big, and reduce the number of allocations in general.
-* [ ] Add more assertions
-  - Pre and post conditions
-  - Assert buffer indices within bounds
-* [ ] Implement a subset of the [cURL][] command line options such
-  as '-X', and more. Using a structure like this:
-
-	struct options {
-		int argc;
-		char **argv; // extra fields in HTTP request headers
-		char *command // GET/PUT/DELETE/...
-	};
 
 [linux]: https://www.linux.org/
 [windows]: https://www.microsoft.com/en-gb/windows

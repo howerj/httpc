@@ -1,6 +1,6 @@
-VERSION=0x010001ul
+HTTPC_VERSION=2.0.0
 STD=c99
-CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="${VERSION}"
+CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DVERSION="\"${HTTPC_VERSION}\""
 TARGET=httpc
 AR      = ar
 ARFLAGS = rcs

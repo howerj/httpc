@@ -271,3 +271,9 @@ int httpc_sleep(unsigned long milliseconds) {
 	return HTTPC_OK;
 }
 
+int httpc_time(unsigned long *milliseconds) {
+	assert(milliseconds);
+	*milliseconds = 1;
+	return 0;
+}
+
