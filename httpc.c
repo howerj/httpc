@@ -58,7 +58,7 @@ typedef unsigned long length_t;
 
 struct httpc {
 	httpc_options_t os;
-	httpc_callback fn;
+	httpc_callback fn; /* TODO: Two callbacks, one for body generation and one for response reception */
 	buffer_t b0, b1, burl; /* buffers for temporary values, heavily reused, be careful! */
 	void *fn_param;
 	int argc;    /* extra headers count */
@@ -69,6 +69,7 @@ struct httpc {
 	char *domain /* or IPv4/IPv6 */, *userpass, *path, *url;
 	void *socket;
 	length_t position, length, max;
+	int state, status;
 	unsigned long start_ms, end_ms;
 	unsigned retries, redirects; /* retry count, redirect count */
 	unsigned retries_max, redirects_max;
@@ -503,6 +504,8 @@ static int httpc_request_send_header(httpc_t *h, buffer_t *b0, buffer_t *b1, int
 			goto fail;
 	}
 	if (op == HTTPC_PUT || op == HTTPC_POST) {
+		//if (buffer_add_string(h, b0, "Accept: application/json\r\n") < 0)
+		//	goto fail;
 		if (h->length_set) {
 			char content[64 + 1] = { 0 };
 			if (buffer_add_string(h, b0, "Content-Length: ") < 0)
@@ -890,7 +893,7 @@ static int httpc_parse_response_body_chunked(httpc_t *h, buffer_t *b0) {
 	return HTTPC_OK;
 }
 
-static int httpc_parse_response_body(httpc_t *h) {
+static int httpc_parse_response_body(httpc_t *h) { /* TODO: Yield */
 	assert(h);
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
@@ -977,85 +980,109 @@ static inline int banner(httpc_t *h) {
 	info(h, "Repo:    "REPO);
 	info(h, "Author:  "AUTHOR);
 	info(h, "Email:   "EMAIL);
-	info(h, "Options: %lu %u %u %u %u %u %lu", 
+	info(h, "Options: stk=%lu tst=%u grw=%u log=%u cons=%u redirs=%u hmax=%lu sz=%u", 
 		HTTPC_STACK_BUFFER_SIZE, HTTPC_TESTS_ON, HTTPC_GROW, 
 		HTTPC_LOGGING, HTTPC_CONNECTION_ATTEMPTS, HTTPC_REDIRECT_MAX, 
-		HTTPC_MAX_HEADER);
+		HTTPC_MAX_HEADER, (unsigned)(sizeof *h));
 	return info(h, "License: "LICENSE);
 }
 
+enum { SM_INIT, SM_OPEN, SM_SNDH, SM_SNDB, SM_RCVH, SM_RCVB, SM_REDR, SM_BCKO, SM_DONE, };
+
+/* TODO: Use the 'HTTPC_YIELD' status in the actual HTTP operations */
 static int httpc_op(httpc_t *h, const char *url, int op) {
 	assert(h);
 	assert(url);
-	int r = HTTPC_OK;
+	int next = SM_DONE;
+	const int yield = !!(h->os.flags & HTTPC_OPT_NON_BLOCKING);
+next_state:
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
-	if (h->os.flags & HTTPC_OPT_NON_BLOCKING)
-		return error(h, "non-blocking is unimplemented");
-	if (h->os.flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING))
-		return error(h, "unknown option provided %u", h->os.flags);
-	if (h->os.time(&h->start_ms) < 0)
-		return error(h, "unable to get time");
-	if (banner(h) < 0)
-		return HTTPC_ERROR;
-	if (buffer(h, &h->b0,   HTTPC_STACK_BUFFER_SIZE) < 0) { r = HTTPC_ERROR; goto end; }
-	if (buffer(h, &h->b1,   HTTPC_STACK_BUFFER_SIZE) < 0) { r = HTTPC_ERROR; goto end; }
-	if (buffer(h, &h->burl, strlen(url) + 1) < 0)         { r = HTTPC_ERROR; goto end; }
-	if (httpc_parse_url(h, url) < 0)                      { r = HTTPC_ERROR; goto end; }
-	if (h->retries_max == 0)
-		h->retries_max = HTTPC_CONNECTION_ATTEMPTS;
-	if (h->redirects_max == 0)
-		h->retries_max = HTTPC_REDIRECT_MAX;
-
-	/* TODO: The library does not yield at the moment, but it could be made to yield in between
-	 * operations first, and that could be done relatively easily by putting those modifications 
-	 * here. Redoing this as a state-machine would help. States would be
-	 * INIT, OPEN, SEND-HEAD, SEND-BODY, RECV-RESP, BACK-OFF, and END. This
-	 * could also potentially allow reuse of connections as well. */
-	for (; h->retries < h->retries_max; h->retries += !(h->progress)) {
-		if (httpc_is_dead(h))
-			return fatal(h, "cannot continue quitting");
-		if (h->os.open(&h->socket, &h->os, h->os.socketopts, h->domain, h->port, h->use_ssl) == HTTPC_OK) {
+	switch (h->state) {
+	case SM_INIT:
+		next = SM_OPEN;
+		h->open = 0;
+		h->progress = 0;
+		if (h->os.flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING))
+			return error(h, "unknown option provided %u", h->os.flags);
+		if (h->os.time(&h->start_ms) < 0)
+			return error(h, "unable to get time");
+		if (banner(h) < 0)
+			return HTTPC_ERROR;
+		if (buffer(h, &h->b0,   HTTPC_STACK_BUFFER_SIZE) < 0) { h->status = HTTPC_ERROR; next = SM_DONE; break; }
+		if (buffer(h, &h->b1,   HTTPC_STACK_BUFFER_SIZE) < 0) { h->status = HTTPC_ERROR; next = SM_DONE; break; }
+		if (buffer(h, &h->burl, strlen(url) + 1) < 0)         { h->status = HTTPC_ERROR; next = SM_DONE; break; }
+		if (httpc_parse_url(h, url) < 0)                      { h->status = HTTPC_ERROR; next = SM_DONE; break; }
+		if (h->retries_max == 0)
+			h->retries_max = HTTPC_CONNECTION_ATTEMPTS;
+		if (h->redirects_max == 0)
+			h->retries_max = HTTPC_REDIRECT_MAX;
+		break;
+	case SM_OPEN: 
+		next = SM_SNDH;
+		if (h->os.open(&h->socket, &h->os, h->os.socketopts, h->domain, h->port, h->use_ssl) == HTTPC_OK)
 			h->open = 1;
-			if (httpc_request_send_header(h, &h->b0, &h->b1, op) < 0)
-				goto backoff;
-			if (op == HTTPC_POST || op == HTTPC_PUT) {
-				if (httpc_generate_request_body(h, &h->b0) < 0)
-					goto backoff;
-			}
-			if (httpc_parse_response_header(h, &h->b0) < 0) {
-				if (op == HTTPC_PUT || op == HTTPC_POST || op == HTTPC_DELETE) {
-					if (h->response) {
-						error(h, "request failed");
-						r = -(int)(h->response);
-						goto end;
-					}
-				}
-				if (h->response >= 400 && h->response <= 499) {
-					r = -(int)(h->response);
-					goto end;
-				}
-				goto backoff;
-			}
-			if (h->redirect) {
-				h->open = 0;
-				(void)h->os.close(h->socket, &h->os);
-				h->redirect = 0;
-				continue;
-			}
-
-			if (op == HTTPC_GET) {
-				const length_t pos = h->position;
-				h->progress = 0;
-				if (httpc_parse_response_body(h) < 0) {
-					h->progress = pos < h->position; /* we have processed some data...*/
-					goto backoff;
+		else
+			next = SM_BCKO;
+		break;
+	case SM_SNDH: 
+		next = SM_SNDB;
+		if (httpc_request_send_header(h, &h->b0, &h->b1, op) < 0)
+			next = SM_BCKO;
+		break;
+	case SM_SNDB: 
+		next = SM_RCVH;
+		if (op == HTTPC_POST || op == HTTPC_PUT) {
+			if (httpc_generate_request_body(h, &h->b0) < 0)
+				next = SM_BCKO;
+		}
+		break;
+	case SM_RCVH: 
+		next = SM_RCVB;
+		if (httpc_parse_response_header(h, &h->b0) < 0) {
+			next = SM_BCKO;
+			if (op == HTTPC_PUT || op == HTTPC_POST || op == HTTPC_DELETE) {
+				if (h->response) {
+					error(h, "request failed");
+					h->status = -(int)(h->response);
+					next      = SM_DONE;
 				}
 			}
+			if (h->response >= 400 && h->response <= 499) {
+				h->status = -(int)(h->response);
+				next      = SM_DONE;
+			}
+		} else if (h->redirect) {
+			next = SM_REDR;
+		}
+		break;
+	case SM_RCVB: 
+		next = SM_DONE;
+		if (op == HTTPC_GET) {
+			const length_t pos = h->position;
+			h->progress = 0;
+			if (httpc_parse_response_body(h) < 0) {
+				h->progress = pos < h->position; /* we have processed some data...*/
+				next = SM_BCKO;
+			}
+		}
+		break;
+	case SM_REDR: 
+		h->open = 0;
+		(void)h->os.close(h->socket, &h->os);
+		h->redirect = 0;
+		next = SM_OPEN;
+		break;
+	case SM_BCKO:
+		/* TODO: Yield if time not done instead of sleeping */
+		next = SM_OPEN;
+		if (h->retries >= h->retries_max) {
+			h->status = HTTPC_ERROR;
+			next      = SM_DONE;
 			break;
 		}
-		error(h, "open failed");
-backoff:
+		h->retries += !(h->progress);
+		h->progress = 0;
 		h->redirect = 0;
 		if (h->open) {
 			h->open = 0;
@@ -1063,29 +1090,42 @@ backoff:
 		}
 		h->socket = NULL;
 		if (httpc_backoff(h) < 0) {
-			r = HTTPC_ERROR;
-			goto end;
+			h->status = HTTPC_ERROR;
+			next      = SM_DONE;
 		}
+		break;
+	case SM_DONE:
+		if (h->open) {
+			h->open = 0;
+			if (h->os.close(h->socket, &h->os) < 0)
+				h->status = HTTPC_ERROR;
+		}
+		h->url = NULL;
+		if (buffer_free(h, &h->b0) < 0)
+			h->status = HTTPC_ERROR;
+		if (buffer_free(h, &h->b1) < 0)
+			h->status = HTTPC_ERROR;
+		if (buffer_free(h, &h->burl) < 0)
+			h->status = HTTPC_ERROR;
+		if (h->os.time(&h->end_ms) < 0)
+			h->status = HTTPC_ERROR;
+		debug(h, "took %lu ms", h->end_ms - h->start_ms);
+		if (httpc_is_dead(h))
+			return HTTPC_ERROR;
+		return h->status;
+	default: 
+		httpc_kill(h);
+		h->status = HTTPC_ERROR;
+		next      = SM_DONE;
+		break;
 	}
-	if (h->retries >= HTTPC_CONNECTION_ATTEMPTS)
-		r = HTTPC_ERROR;
-end:
-	if (h->open) {
-		h->open = 0;
-		if (h->os.close(h->socket, &h->os) < 0)
-			r = HTTPC_ERROR;
-	}
-	h->url = NULL;
-	if (buffer_free(h, &h->b0) < 0)
-		r = HTTPC_ERROR;
-	if (buffer_free(h, &h->b1) < 0)
-		r = HTTPC_ERROR;
-	if (buffer_free(h, &h->burl) < 0)
-		r = HTTPC_ERROR;
-	if (h->os.time(&h->end_ms) < 0)
-		r = HTTPC_ERROR;
-	debug(h, "took %lu ms", h->end_ms - h->start_ms);
-	return r;
+	if (h->state != next)
+		debug(h, "state -- %d -> %d", h->state, next);
+	h->state = next;
+	if (!yield)
+		goto next_state;
+	/*debug(h, "I yield the floor!");*/
+	return HTTPC_YIELD;
 }
 
 int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *param) {

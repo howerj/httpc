@@ -136,6 +136,9 @@ Known limitations include:
 * The socket and SSL settings are provided by a series of callbacks - this
   allows you to set things like timeouts and keep-alive settings, the defaults
   may not suite you.
+* The set of functions provided by this library should suite the common cases,
+  however somethings are not supported, for example a GET request can have a
+  body, but there is no way to handle this.
 * Entropy cannot be reversed, meaning all acts of man no matter how great will 
   eventually be rendered futile, the best one can hope for is eternal return, 
   are you proud of what you have achieved? Or will you die like a dog in the
