@@ -99,7 +99,6 @@ static int httpc_getopt(httpc_getopt_t *opt, const int argc, char *const argv[],
 	return opt->option; /* dump back option letter */
 }
 
-
 static void *httpc_allocator(void *arena, void *ptr, const size_t oldsz, const size_t newsz) {
 	UNUSED(arena);
 	if (newsz == 0) {
@@ -152,8 +151,8 @@ Options:\n\n\
 \t-h\tprint help and exit successfully\n\
 \t-t\trun the built in tests, returning failure status (0 = pass)\n\
 \t-u URL\tset URL to use\n\
-\t-1 perform HTTP 1.0 request, not a HTTP 1.1 request\n\
-\t-v turn logging on\n\
+\t-1\tperform HTTP 1.0 request, not a HTTP 1.1 request\n\
+\t-v\tturn logging on\n\
 \tURL\tset URL to use\n\
 \n\
 Returns non zero value on failure. stdin(3) for input, stdout(3)\n\

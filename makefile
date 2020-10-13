@@ -1,4 +1,4 @@
-HTTPC_VERSION=2.0.0
+HTTPC_VERSION=2.0.1
 STD=c99
 CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DVERSION="\"${HTTPC_VERSION}\""
 TARGET=httpc
@@ -59,7 +59,7 @@ ${TARGET}.1: readme.md
 install: ${TARGET} lib${TARGET}.a lib${TARGET}.${DLL} ${TARGET}.1 .git
 	install -p -D ${TARGET} ${DESTDIR}/bin/${TARGET}
 	install -p -m 644 -D lib${TARGET}.a ${DESTDIR}/lib/lib${TARGET}.a
-	install -p -m 755 -D lib${TARGET}.so ${DESTDIR}/lib/lib${TARGET}.so
+	install -p -m 755 -D lib${TARGET}.${DLL} ${DESTDIR}/lib/lib${TARGET}.${DLL}
 	install -p -m 644 -D ${TARGET}.h ${DESTDIR}/include/${TARGET}.h
 	-install -p -m 644 -D ${TARGET}.1 ${DESTDIR}/man/${TARGET}.1
 	mkdir -p ${DESTDIR}/src

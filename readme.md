@@ -1,10 +1,24 @@
-# Embeddable HTTP(S) Client
+% HTTPC(1) | A HTTP(S) Client For The Discerning Embedded Programmer
 
-* Project:    Embeddable HTTP(S) Client
-* Author:     Richard James Howe
-* Email:      <mailto:howe.r.j.89@gmail.com>
-* License:    The Unlicense
-* Repository: <https://github.com/howerj/httpc>
+# NAME
+
+HTTPC - A HTTP(S) Client For The Discerning Embedded Programmer
+
+# SYNOPSIS
+
+httpc -t
+
+httpc example.com
+
+httpc -o PUT example.com < file.txt
+
+# DESCRIPTION
+
+	Project:    Embeddable HTTP(S) Client
+	Author:     Richard James Howe
+	Email:      <mailto:howe.r.j.89@gmail.com>
+	License:    The Unlicense
+	Repository: <https://github.com/howerj/httpc>
 
 This library implements a small HTTP(S) client that can be used for downloading files 
 and firmware on an embedded platform. The demonstration code targets [linux][] and 
@@ -86,7 +100,8 @@ build system (and do not require you to modify the source itself).
 
 The code is most likely to have been recently tested on Linux, it may work on
 other Unixen, and it will be less frequently tested on Windows. Likewise, it is
-more likely to have been tested on a 64-bit platform.
+more likely to have been tested on a 64-bit platform. The SSL library, if used
+at all, should provide an openSSL interface on either Windows or Linux.
 
 # RETURN CODES
 
@@ -101,20 +116,30 @@ This program is licensed under the [The Unlicense][], do what thou wilt.
 
 Known limitations include:
 
-* A line in the HTTP header must be smaller than 512 bytes in size (with the
-  default configuration) otherwise parsing the header will fail.
+* If reallocation is disabled (is is enabled by default) then the default
+  buffer size (of 128, which can be changed) will place limitations of URL
+  length and line length (each field in the HTTP header is a single line).
 * File sizes are probably limited up to 2GiB on many platforms.
 * This library blocks, and a non-blocking version is not likely to be
   developed as it would increase the code complexity too much. See
   <https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html> for more
   information about coroutines and C, which would solve this problem, or at
-  least create new ones.
+  least create new ones. If a non-blocking version were to be created it
+  would be done incrementally (ie. it would still block, but for shorter
+  periods of time).
 * The library is quite thirsty for stack size for a library meant to be run on
-  an embedded microcontroller. It will require at least 1-2KiB of stack, and
+  an embedded microcontroller. It will require at least 1KiB of stack, and
   possibly more depending on how your callbacks are written.
 * The client is more liberal in what it will accept from the server than it
   should be, allowing newlines to be terminated by a single CR with no LF, and
   comparisons are done in a case-insensitive manner.
+* The socket and SSL settings are provided by a series of callbacks - this
+  allows you to set things like timeouts and keep-alive settings, the defaults
+  may not suite you.
+* Entropy cannot be reversed, meaning all acts of man no matter how great will 
+  eventually be rendered futile, the best one can hope for is eternal return, 
+  are you proud of what you have achieved? Or will you die like a dog in the
+  face of heat-death?
 
 # BUGS
 
@@ -122,7 +147,8 @@ For any bugs please contact the author at <mailto:howe.r.j.89@gmail.com>.
 Please include as much information as possible including, but not limited to:
 information on what platform you are compiling your code on (OS, 32/64-bit,
 ...), tracing information (for example, valgrind output), a minimal test 
-case, thoughts, comments and general rants.
+case, thoughts, comments and general rants. Alternatively shout into a buck or
+pray to your gods.
 
 [linux]: https://www.linux.org/
 [windows]: https://www.microsoft.com/en-gb/windows

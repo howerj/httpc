@@ -281,9 +281,9 @@ int httpc_time(unsigned long *milliseconds) {
 	assert(milliseconds);
 	*milliseconds = 0;
 	struct timespec t;
-	if (clock_gettime(CLOCK_REALTIME, &t) < 0)
+	if (clock_gettime(CLOCK_MONOTONIC_RAW, &t) < 0)
 		return HTTPC_ERROR;
-    	*milliseconds = t.tv_sec * 1000ul;
-	return HTTPC_ERROR;
+    	*milliseconds = (t.tv_sec * 1000ul) + (t.tv_nsec / (1000000ul));
+	return HTTPC_OK;
 }
 
