@@ -60,6 +60,8 @@ Options:
 
 * **-y** : turn yielding on, this is only useful for debugging the library.
 
+* **-H**: add a custom header to the request
+
 Examples:
 
 	./httpc example.com/index.html

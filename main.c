@@ -154,6 +154,7 @@ Options:\n\n\
 \t-1\tperform HTTP 1.0 request, not a HTTP 1.1 request\n\
 \t-v\tturn logging on\n\
 \t-y\tturn yielding on, for debugging only\n\
+\t-H #\tAdd custom header, use with caution\n\
 \tURL\tset URL to use\n\
 \n\
 Returns non zero value on failure. stdin(3) for input, stdout(3)\n\
@@ -229,12 +230,13 @@ int main(int argc, char **argv) {
 		.logfile    = stderr,
 	};
 
-	int ch = 0, op = OP_GET;
+	int ch = 0, op = OP_GET, arg_custom_count = 0;
+	char *arg_custom[argc];
 	const char *url = NULL;
-	httpc_getopt_t opt = { .init = 0 };
-	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:1vy")) != -1) {
+	httpc_getopt_t opt = { .init = 0, };
+	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:1vyH:")) != -1) {
 		switch (ch) {
-		default:
+		default: /* fall-through */
 		case 'h': return help(stderr, argv[0]), 0;
 		case 'o': op = operation(opt.arg); break;
 		case 't': return -httpc_tests(&a);
@@ -242,8 +244,11 @@ int main(int argc, char **argv) {
 		case 'v': a.flags |= HTTPC_OPT_LOGGING_ON; break;
 		case '1': a.flags |= HTTPC_OPT_HTTP_1_0; break;
 		case 'y': a.flags |= HTTPC_OPT_NON_BLOCKING; break;
+		case 'H': arg_custom[arg_custom_count++] = opt.arg; break;
 		}
 	}
+	a.argc = arg_custom_count;
+	a.argv = arg_custom;
 	if (!url) {
 		if (opt.index != (argc - 1)) {
 			(void)help(stderr, argv[0]);

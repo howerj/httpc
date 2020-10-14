@@ -66,8 +66,6 @@ struct httpc {
 	httpc_callback snd, rcv;
 	buffer_t b0, burl; /* buffers for temporary values, heavily reused, be careful! */
 	void *snd_param, *rcv_param;
-	int argc;    /* extra headers count */
-	char **argv; /* extra headers, can be NULL if argc == 0 */
 	/* These strings point into 'url', which has been modified from the
 	 * original URL to contain a bunch of NUL terminated strings where the
 	 * delimiters were */
@@ -506,7 +504,7 @@ static const char *op_to_str(int op) {
 static int httpc_request_send_header(httpc_t *h, buffer_t *b0, int op) {
 	assert(h);
 	assert(b0);
-	implies(h->argc, h->argv);
+	implies(h->os.argc, h->os.argv);
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
 	const char *operation = op_to_str(op);
@@ -539,8 +537,6 @@ static int httpc_request_send_header(httpc_t *h, buffer_t *b0, int op) {
 			goto fail;
 	}
 	if (op == HTTPC_PUT || op == HTTPC_POST) {
-		//if (buffer_add_string(h, b0, "Accept: application/json\r\n") < 0)
-		//	goto fail;
 		if (h->length_set) {
 			char content[64 + 1] = { 0 };
 			if (buffer_add_string(h, b0, "Content-Length: ") < 0)
@@ -576,14 +572,15 @@ static int httpc_request_send_header(httpc_t *h, buffer_t *b0, int op) {
 	if (httpc_network_write(h, b0->buffer, b0->used - 1u) < 0)
 		goto fail;
 
-	for (int i = 0; i < h->argc; i++) {
-		const char *line = h->argv[i];
+	for (int i = 0; i < h->os.argc; i++) {
+		const char *line = h->os.argv[i];
 		size_t l = 0;
 		for (l = 0; line[l]; l++)
 			if (line[l] == '\r' || line[l] == '\n')
 				return fatal(h, "invalid custom header field (illegal chars present)");
 		if (httpc_network_write(h, (unsigned char *)line, l) < 0)
 			goto fail;
+		debug(h, "custom header '%s' added", line);
 		if (httpc_network_write(h, (unsigned char *)"\r\n", 2) < 0)
 			goto fail;
 	}
@@ -957,13 +954,8 @@ static int httpc_generate_request_body(httpc_t *h, buffer_t *b0) {
 	for (size_t pos = 0;;) {
 		b0->used = 0;
 		r = h->snd(h->snd_param, b0->buffer, b0->allocated, pos);
-		if (r == 0) {
-			if (chunky) {
-				if (httpc_network_write(h, (unsigned char*)"0\r\n", 3) < 0)
-					r = error(h, "write failed");
-			}
+		if (r == 0)
 			break; /* done! */
-		}
 		if (r < 0) {
 			(void)error(h, "snd failed");
 			break;
@@ -998,21 +990,13 @@ static int httpc_generate_request_body(httpc_t *h, buffer_t *b0) {
 				break;
 			}
 		}
-
-		if (r < (int)(b0->allocated)) { /* NB. might not want this behavior */
-			if (chunky) {
-				if (httpc_network_write(h, (unsigned char*)"0\r\n", 3) < 0)
-					r = error(h, "write failed");
-			}
-			break;
-		}
 		if (httpc_is_yield_on(h))
 			return HTTPC_YIELD;
 	}
 	if (r < 0)
 		return error(h, "body generation failed");
 	if (chunky) {
-		if (httpc_network_write(h, (unsigned char*)"0\r\n", 3) < 0)
+		if (httpc_network_write(h, (unsigned char*)"0\r\n\r\n", 5) < 0)
 			return error(h, "write failed");
 	}
 	return info(h, "body generated");
@@ -1123,7 +1107,6 @@ next_state:
 				if (h->response) {
 					error(h, "request failed");
 					h->status = -(int)(h->response);
-					next      = SM_DONE;
 				}
 			}
 			if (h->response >= 400 && h->response <= 499) {

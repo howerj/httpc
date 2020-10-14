@@ -44,7 +44,10 @@ struct httpc_options {
 	     *socketopts, /* passed to open */
 	     *state;      /* internal state for each operation; do not use */
 
-	unsigned flags; /* Options for library */
+	unsigned flags;   /* Options for library */
+
+	int argc;         /* custom headers count; number of custom headers */
+	char **argv;      /* custom headers; appended to the HTTP request */
 };
 
 typedef struct httpc_options httpc_options_t;
