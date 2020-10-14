@@ -64,7 +64,7 @@ typedef unsigned long length_t;
 struct httpc {
 	httpc_options_t os;
 	httpc_callback snd, rcv;
-	buffer_t b0, b1, burl; /* buffers for temporary values, heavily reused, be careful! */
+	buffer_t b0, burl; /* buffers for temporary values, heavily reused, be careful! */
 	void *snd_param, *rcv_param;
 	int argc;    /* extra headers count */
 	char **argv; /* extra headers, can be NULL if argc == 0 */
@@ -89,44 +89,6 @@ struct httpc {
 		 open          :1, /* is the file handle open? */
 		 progress      :1; /* are we making progress? */
 };
-
-/* Modified from: <https://stackoverflow.com/questions/342409>
- * - Output buffer is NUL terminated on a successful encoding
- * - Returned output length is equivalent to strlen(out)
- * - Returns negative on error, zero on success. */
-static int base64_encode(const unsigned char *in, const size_t input_length, unsigned char *out, size_t *output_length) {
-	assert(in);
-	assert(out);
-	/* assert(shake_it_all_about); */
-	const size_t out_buffer_length = *output_length;
-	const size_t encoded_length  = 4ull * ((input_length + 2ull) / 3ull);
-
-	if (out_buffer_length < (encoded_length + 1/*NUL*/))
-		return -1;
-
-	for (size_t i = 0, j = 0; i < input_length;) {
-		static const char encoding_table[] = {
-			'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
-			'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
-			'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-			'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'
-		};
-		const uint32_t octet_a = i < input_length ? (unsigned char)in[i++] : 0;
-		const uint32_t octet_b = i < input_length ? (unsigned char)in[i++] : 0;
-		const uint32_t octet_c = i < input_length ? (unsigned char)in[i++] : 0;
-		const uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
-		out[j++] = encoding_table[(triple >> (3 * 6)) & 0x3F];
-		out[j++] = encoding_table[(triple >> (2 * 6)) & 0x3F];
-		out[j++] = encoding_table[(triple >> (1 * 6)) & 0x3F];
-		out[j++] = encoding_table[(triple >> (0 * 6)) & 0x3F];
-	}
-	static const int mod_table[] = { 0, 2, 1, };
-	for (int i = 0; i < mod_table[input_length % 3]; i++)
-		out[encoded_length - 1 - i] = '=';
-	out[encoded_length] = '\0';
-	*output_length = encoded_length;
-	return 0;
-}
 
 static inline void reverse(char * const r, const size_t length) {
 	assert(r);
@@ -347,6 +309,43 @@ static int buffer_add_string(httpc_t *h, buffer_t *b, const char *s) {
 	return HTTPC_OK;
 }
 
+/* Modified from: <https://stackoverflow.com/questions/342409> */
+static int buffer_add_base64(httpc_t *h, buffer_t *out, const unsigned char *in, const size_t input_length) {
+	assert(h);
+	assert(in);
+	assert(out);
+	/* assert(shake_it_all_about); */
+	const size_t encoded_length  = 4ull * ((input_length + 2ull) / 3ull);
+	const size_t needs = encoded_length + out->used;
+	if (needs < encoded_length)
+		return -1;
+	if (buffer(h, out, needs) < 0)
+		return -1;
+
+	for (size_t i = 0, j = out->used; i < input_length;) {
+		static const char encoding_table[] = {
+			'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
+			'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
+			'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+			'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'
+		};
+		const uint32_t octet_a = i < input_length ? (unsigned char)in[i++] : 0;
+		const uint32_t octet_b = i < input_length ? (unsigned char)in[i++] : 0;
+		const uint32_t octet_c = i < input_length ? (unsigned char)in[i++] : 0;
+		const uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+		out->buffer[j++] = encoding_table[(triple >> (3 * 6)) & 0x3F];
+		out->buffer[j++] = encoding_table[(triple >> (2 * 6)) & 0x3F];
+		out->buffer[j++] = encoding_table[(triple >> (1 * 6)) & 0x3F];
+		out->buffer[j++] = encoding_table[(triple >> (0 * 6)) & 0x3F];
+	}
+	static const int mod_table[] = { 0, 2, 1, };
+	for (int i = 0; i < mod_table[input_length % 3]; i++)
+		out->buffer[needs - 1u - i] = '=';
+	out->buffer[needs] = '\0';
+	out->used = needs;
+	return 0;
+}
+
 static inline int convert(int ch) {
 	ch = toupper(ch);
 	static const char m[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -504,10 +503,9 @@ static const char *op_to_str(int op) {
 	return NULL;
 }
 
-static int httpc_request_send_header(httpc_t *h, buffer_t *b0, buffer_t *b1, int op) {
+static int httpc_request_send_header(httpc_t *h, buffer_t *b0, int op) {
 	assert(h);
 	assert(b0);
-	assert(b1);
 	implies(h->argc, h->argv);
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
@@ -564,23 +562,17 @@ static int httpc_request_send_header(httpc_t *h, buffer_t *b0, buffer_t *b1, int
 		goto fail;
 	if (h->userpass) {
 		const size_t upl = strlen(h->userpass);
-		const size_t needs = 1ul + ((upl / 3ul) * 4ul);
-		if (buffer(h, b1, needs) < 0)
+		if (buffer_add_string(h, b0, "Authorization: Basic ") < 0)
 			goto fail;
-		/* TODO: We could get rid of the "b1" buffer if "base64_encode" called "buffer_add_string" into "b0" */
-		size_t b64l = b1->allocated;
-		if (base64_encode((uint8_t*)h->userpass, upl, (uint8_t*)b1->buffer, &b64l) < 0) {
+		if (buffer_add_base64(h, b0, (uint8_t*)h->userpass, upl) < 0) {
 			error(h, "base64 encoding fail");
 			goto fail;
 		}
-		if (buffer_add_string(h, b0, "Authorization: Basic ") < 0)
-			goto fail;
-		if (buffer_add_string(h, b0, (char*)b1->buffer) < 0)
-			goto fail;
 		if (buffer_add_string(h, b0, "\r\n") < 0)
 			goto fail;
 	}
 
+	assert(b0->used > 0u);
 	if (httpc_network_write(h, b0->buffer, b0->used - 1u) < 0)
 		goto fail;
 
@@ -1085,7 +1077,6 @@ next_state:
 			next      = SM_DONE;
 		}
 		if (buffer(h, &h->b0,   HTTPC_STACK_BUFFER_SIZE) < 0) { h->status = HTTPC_ERROR; next = SM_DONE; break; }
-		if (buffer(h, &h->b1,   HTTPC_STACK_BUFFER_SIZE) < 0) { h->status = HTTPC_ERROR; next = SM_DONE; break; }
 		if (buffer(h, &h->burl, strlen(url) + 1) < 0)         { h->status = HTTPC_ERROR; next = SM_DONE; break; }
 		if (httpc_parse_url(h, url) < 0)                      { h->status = HTTPC_ERROR; next = SM_DONE; break; }
 		if (h->retries_max == 0)
@@ -1106,7 +1097,7 @@ next_state:
 	}
 	case SM_SNDH: { 
 		next = SM_SNDB;
-		const int y = httpc_request_send_header(h, &h->b0, &h->b1, op);
+		const int y = httpc_request_send_header(h, &h->b0, op);
 		if (y < 0)
 			next = SM_BCKO;
 		else if (y == HTTPC_YIELD)
@@ -1205,8 +1196,6 @@ next_state:
 		}
 		h->url = NULL;
 		if (buffer_free(h, &h->b0) < 0)
-			h->status = HTTPC_ERROR;
-		if (buffer_free(h, &h->b1) < 0)
 			h->status = HTTPC_ERROR;
 		if (buffer_free(h, &h->burl) < 0)
 			h->status = HTTPC_ERROR;
@@ -1343,7 +1332,7 @@ static int httpc_put_buffer_cb(void *param, unsigned char *buf, size_t length, s
 	return copy;
 }
 
-/* TODO: Allow non-blocking versions */
+/* TODO: Implement non-blocking versions */
 int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *length) {
 	assert(url);
 	assert(a);
