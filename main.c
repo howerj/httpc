@@ -139,7 +139,7 @@ static int help(FILE *out, const char *arg0) {
 	assert(out);
 	assert(arg0);
 	const char *fmt = "\
-Usage:      %s -[ht1v] -u www.example.com/index.html\n\n\
+Usage:      %s -[ht1vy] -u www.example.com/index.html\n\n\
 Project:    Embeddable HTTP(S) Client\n\
 Author:     Richard James Howe\n\
 Email:      <mailto:howe.r.j.89@gmail.com>\n\
@@ -153,6 +153,8 @@ Options:\n\n\
 \t-u URL\tset URL to use\n\
 \t-1\tperform HTTP 1.0 request, not a HTTP 1.1 request\n\
 \t-v\tturn logging on\n\
+\t-y\tturn yielding on, for debugging only\n\
+\t-H #\tAdd custom header, use with caution\n\
 \tURL\tset URL to use\n\
 \n\
 Returns non zero value on failure. stdin(3) for input, stdout(3)\n\
@@ -179,8 +181,37 @@ static int operation(const char *s) {
 	return -1;
 }
 
-int main(int argc, char **argv) {
+static int yield1(int (*cb)(httpc_options_t *, const char *, httpc_callback, void *), httpc_options_t *a, const char *url, httpc_callback fn, void *param) {
+	assert(cb);
+	assert(a);
+	assert(url);
+	int r = HTTPC_YIELD;
+	for (;r > HTTPC_OK;) {
+		r = cb(a, url, fn, param);
+		if (r == HTTPC_YIELD && a->flags & HTTPC_OPT_LOGGING_ON)
+			(void)fprintf(stderr, "(yield)\n");
+		if (httpc_sleep(100) < 0)
+			return HTTPC_ERROR;
+	}
+	return r;
+}
 
+static int yield2(int (*cb)(httpc_options_t *, const char *), httpc_options_t *a, const char *url) {
+	assert(cb);
+	assert(a);
+	assert(url);
+	int r = HTTPC_YIELD;
+	for (;r > HTTPC_OK;) {
+		r = cb(a, url);
+		if (r == HTTPC_YIELD && a->flags & HTTPC_OPT_LOGGING_ON)
+			(void)fprintf(stderr, "(yield)\n");
+		if (httpc_sleep(100) < 0)
+			return HTTPC_ERROR;
+	}
+	return r;
+}
+
+int main(int argc, char **argv) {
 	binary(stdin);
 	binary(stdout);
 	binary(stderr);
@@ -199,19 +230,25 @@ int main(int argc, char **argv) {
 		.logfile    = stderr,
 	};
 
-	int ch = 0, op = OP_GET;
+	int ch = 0, op = OP_GET, arg_custom_count = 0;
+	char *arg_custom[argc];
 	const char *url = NULL;
-	httpc_getopt_t opt = { .init = 0 };
-	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:1v")) != -1) {
+	httpc_getopt_t opt = { .init = 0, };
+	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:1vyH:")) != -1) {
 		switch (ch) {
-		case 'o': op = operation(opt.arg); break;
+		default: /* fall-through */
 		case 'h': return help(stderr, argv[0]), 0;
+		case 'o': op = operation(opt.arg); break;
 		case 't': return -httpc_tests(&a);
 		case 'u': url = opt.arg; break;
 		case 'v': a.flags |= HTTPC_OPT_LOGGING_ON; break;
 		case '1': a.flags |= HTTPC_OPT_HTTP_1_0; break;
+		case 'y': a.flags |= HTTPC_OPT_NON_BLOCKING; break;
+		case 'H': arg_custom[arg_custom_count++] = opt.arg; break;
 		}
 	}
+	a.argc = arg_custom_count;
+	a.argv = arg_custom;
 	if (!url) {
 		if (opt.index != (argc - 1)) {
 			(void)help(stderr, argv[0]);
@@ -221,13 +258,13 @@ int main(int argc, char **argv) {
 	}
 	httpc_dump_t d = { .position = 0, .output = stdout, };
 	switch (op) {
-	case OP_GET:     return !!httpc_get(&a, url, httpc_dump_cb, &d);
-	case OP_HEAD:    return !!httpc_head(&a, url);
-	case OP_PUT:     return !!httpc_put(&a, url, httpc_put_cb, stdin);
-	case OP_DELETE:  return !!httpc_delete(&a, url);
-	case OP_POST:    return !!httpc_post(&a, url, httpc_put_cb, stdin);
-	case OP_TRACE:   return !!httpc_trace(&a, url);
-	case OP_OPTIONS: return !!httpc_options(&a, url);
+	case OP_GET:     return !!yield1(httpc_get,     &a, url, httpc_dump_cb, &d);
+	case OP_HEAD:    return !!yield2(httpc_head,    &a, url);
+	case OP_PUT:     return !!yield1(httpc_put,     &a, url, httpc_put_cb, stdin);
+	case OP_DELETE:  return !!yield2(httpc_delete,  &a, url);
+	case OP_POST:    return !!yield1(httpc_post,    &a, url, httpc_put_cb, stdin);
+	case OP_TRACE:   return !!yield2(httpc_trace,   &a, url);
+	case OP_OPTIONS: return !!yield2(httpc_options, &a, url);
 	default:
 		(void)fprintf(stderr, "operation unimplemented\n");
 		return 1;

@@ -26,13 +26,15 @@ enum {
 	HTTPC_OPT_NON_BLOCKING = 1u << 2, /* turn on non-blocking mode, library will return HTTPC_YIELD instead of blocking */
 };
 
+typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, size_t position);
+
 struct httpc_options {
 	allocator_fn allocator;
 
 	int (*open)(void **socket, struct httpc_options *os, void *opts, const char *domain, unsigned short port, int use_ssl);
 	int (*close)(void *socket, struct httpc_options *os);
 	int (*read)(void *socket, unsigned char *buf, size_t *length);
-	int (*write)(void *socket, const unsigned char *buf, size_t length);
+	int (*write)(void *socket, const unsigned char *buf, size_t *length);
 	int (*sleep)(unsigned long milliseconds);
 	int (*time)(unsigned long *milliseconds);
 	int (*logger)(void *file, const char *fmt, va_list ap);
@@ -42,7 +44,10 @@ struct httpc_options {
 	     *socketopts, /* passed to open */
 	     *state;      /* internal state for each operation; do not use */
 
-	unsigned flags; /* Options for library */
+	unsigned flags;   /* Options for library */
+
+	int argc;         /* custom headers count; number of custom headers */
+	char **argv;      /* custom headers; appended to the HTTP request */
 };
 
 typedef struct httpc_options httpc_options_t;
@@ -53,8 +58,6 @@ enum {
 	HTTPC_YIELD =  1, /* call again later - the operation has not finished */
 }; 
 
-typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, size_t position);
-
 struct httpc;
 typedef struct httpc httpc_t;
 
@@ -62,7 +65,7 @@ typedef struct httpc httpc_t;
 HTTPC_API int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *param);
 HTTPC_API int httpc_put(httpc_options_t *a, const char *url, httpc_callback fn, void *param); /* fn should return size, 0 on stop, -1 on failure */
 HTTPC_API int httpc_post(httpc_options_t *a, const char *url, httpc_callback fn, void *param); /* fn should return size, 0 on stop, -1 on failure */
-HTTPC_API int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length); /* store GET to buffer */
+HTTPC_API int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *length); /* store GET to buffer */
 HTTPC_API int httpc_put_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length); /* PUT from buffer */
 HTTPC_API int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length); /* POST from buffer */
 HTTPC_API int httpc_head(httpc_options_t *a, const char *url);
@@ -72,11 +75,13 @@ HTTPC_API int httpc_options(httpc_options_t *a, const char *url);
 HTTPC_API int httpc_tests(httpc_options_t *a);
 
 /* you provide these functions and populate 'httpc_options_t' with them when porting
- * to a new platform (ie. Not Unix or Windows) - return negative on failure, zero on success. */
+ * to a new platform (ie. Not Unix or Windows) - return negative on failure, 
+ * zero (HTTPC_OK) on success, and for open/close/read/write return HTTPC_YIELD 
+ * if you want the client to yield to its' caller. */
 HTTPC_API extern int httpc_open(void **socket, httpc_options_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
 HTTPC_API extern int httpc_close(void *socket, httpc_options_t *a);
 HTTPC_API extern int httpc_read(void *socket, unsigned char *buf, size_t *length);
-HTTPC_API extern int httpc_write(void *socket, const unsigned char *buf, size_t length);
+HTTPC_API extern int httpc_write(void *socket, const unsigned char *buf, size_t *length);
 HTTPC_API extern int httpc_sleep(unsigned long milliseconds);
 HTTPC_API extern int httpc_time(unsigned long *milliseconds);
 HTTPC_API extern int httpc_logger(void *logfile, const char *fmt, va_list ap);
