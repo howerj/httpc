@@ -166,11 +166,11 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 }
 
 #if HTTPC_LOGGING == 0
-static inline int code(const int code) { return code; } /* suppresses warnings */
-#define debug(H, ...) (code(HTTPC_OK))
-#define info(H, ...)  (code(HTTPC_OK))
-#define error(H, ...) (code(HTTPC_ERROR))
-#define fatal(H, ...) (httpc_kill((H)))
+static inline int rcode(const int c) { return c; } /* suppresses warnings */
+#define debug(H, ...) rcode(HTTPC_OK)
+#define info(H, ...)  rcode(HTTPC_OK)
+#define error(H, ...) rcode(HTTPC_ERROR)
+#define fatal(H, ...) httpc_kill((H))
 #else
 #define debug(H, ...) httpc_log_line((H), "debug", 0, HTTPC_OK,    __LINE__, __VA_ARGS__)
 #define info(H, ...)  httpc_log_line((H), "info",  0, HTTPC_OK,    __LINE__, __VA_ARGS__)
