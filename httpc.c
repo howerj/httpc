@@ -316,13 +316,13 @@ static int buffer_add_base64(httpc_t *h, buffer_t *out, const unsigned char *in,
 	assert(out);
 	/* assert(shake_it_all_about); */
 	const size_t encoded_length  = 4ull * ((input_length + 2ull) / 3ull);
-	const size_t needs = encoded_length + out->used;
+	const size_t needs = 1u + encoded_length + out->used;
 	if (needs < encoded_length)
 		return -1;
 	if (buffer(h, out, needs) < 0)
 		return -1;
-
-	for (size_t i = 0, j = out->used; i < input_length;) {
+	size_t j = out->used - (out->used != 0);
+	for (size_t i = 0; i < input_length;) {
 		static const char encoding_table[] = {
 			'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
 			'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
@@ -340,9 +340,9 @@ static int buffer_add_base64(httpc_t *h, buffer_t *out, const unsigned char *in,
 	}
 	static const int mod_table[] = { 0, 2, 1, };
 	for (int i = 0; i < mod_table[input_length % 3]; i++)
-		out->buffer[needs - 1u - i] = '=';
-	out->buffer[needs] = '\0';
-	out->used = needs;
+		out->buffer[j - 1u - i] = '=';
+	out->buffer[j] = '\0';
+	out->used = j;
 	return 0;
 }
 

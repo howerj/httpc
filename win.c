@@ -120,7 +120,14 @@ static int ssl_write(socket_t *s, const unsigned char *buf, size_t *length) {
 #if USE_SSL == 0
 	return HTTPC_ERROR;
 #else
-	return SSL_write_ex(s->ssl, buf, *length, length) <= 0 ? HTTPC_ERROR : HTTPC_OK;
+	assert(*length < INT_MAX);
+	if (*length == 0)
+		return HTTPC_OK;
+	const int r = SSL_write(s->ssl, buf, *length);
+	*length = 0;
+	if (r > 0)
+		*length = r;
+	return r > 0 ? HTTPC_OK : HTTPC_ERROR;
 #endif
 }
 
@@ -260,7 +267,7 @@ int httpc_write(void *socket, const unsigned char *buf, size_t *length) {
 	assert(length);
 	socket_t *s = socket;
 	if (s->use_ssl)
-		return ssl_write(s, buf, *length);
+		return ssl_write(s, buf, length);
 	errno = 0;
 	const intptr_t fd = s->fd;
 	const ssize_t wr = send(fd, (const char *)buf, *length, 0);
