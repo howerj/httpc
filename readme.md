@@ -44,7 +44,7 @@ program and library - if you do decided to use it, good luck porting it!
 
 # EXAMPLE USAGE
 
-	Usage: ./httpc [-ht] *OR* -[1v] -u URL *OR* -[1v] URL
+	Usage: ./httpc [-ht] *OR* -[1vy] -u URL *OR* -[1vy] URL
 
 Options:
 
@@ -57,6 +57,8 @@ Options:
 * **-1** : perform a HTTP 1.0 request, with HTTP 1.1 responses still being dealt with
 
 * **-v** : add logging
+
+* **-y** : turn yielding on, this is only useful for debugging the library.
 
 Examples:
 
@@ -120,13 +122,12 @@ Known limitations include:
   buffer size (of 128, which can be changed) will place limitations of URL
   length and line length (each field in the HTTP header is a single line).
 * File sizes are probably limited up to 2GiB on many platforms.
-* This library blocks, and a non-blocking version is not likely to be
-  developed as it would increase the code complexity too much. See
-  <https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html> for more
-  information about coroutines and C, which would solve this problem, or at
-  least create new ones. If a non-blocking version were to be created it
-  would be done incrementally (ie. it would still block, but for shorter
-  periods of time).
+* The library has a non-blocking version, however what this really means is
+  'less-blocky' and may block until a time out on a socket. This is likely to
+  improve and yield more often as time goes on. However turning this library
+  into a fully non-blocking version is a non-trivial task. See
+  <https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html> for both
+  a description of the problem and a possible solution in C.
 * The library is quite thirsty for stack size for a library meant to be run on
   an embedded microcontroller. It will require at least 1KiB of stack, and
   possibly more depending on how your callbacks are written.
