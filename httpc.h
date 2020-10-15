@@ -24,6 +24,7 @@ enum {
 	HTTPC_OPT_HTTP_1_0     = 1u << 0, /* attempt HTTP 1.0 request, although still process HTTP 1.1 responses */
 	HTTPC_OPT_LOGGING_ON   = 1u << 1, /* turn logging on, if compiled in */
 	HTTPC_OPT_NON_BLOCKING = 1u << 2, /* turn on non-blocking mode, library will return HTTPC_YIELD instead of blocking */
+	HTTPC_OPT_REUSE        = 1u << 3, /* turn on connection reuse */
 };
 
 typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, size_t position);
@@ -44,7 +45,7 @@ struct httpc_options {
 	     *socketopts, /* passed to open */
 	     *state;      /* internal state for each operation; do not use */
 
-	unsigned flags;   /* Options for library */
+	unsigned flags;   /* options for library */
 
 	int argc;         /* custom headers count; number of custom headers */
 	char **argv;      /* custom headers; appended to the HTTP request */
@@ -52,11 +53,12 @@ struct httpc_options {
 
 typedef struct httpc_options httpc_options_t;
 
-enum { 
+enum {
 	HTTPC_ERROR = -1, /* negated HTTP error codes also returned */
-	HTTPC_OK    =  0, /* operation completed successfully */
+	HTTPC_OK    =  0, /* all operations completed successfully */
 	HTTPC_YIELD =  1, /* call again later - the operation has not finished */
-}; 
+	HTTPC_REUSE =  2, /* operation complete, connection not closed */
+};
 
 struct httpc;
 typedef struct httpc httpc_t;
@@ -75,8 +77,8 @@ HTTPC_API int httpc_options(httpc_options_t *a, const char *url);
 HTTPC_API int httpc_tests(httpc_options_t *a);
 
 /* you provide these functions and populate 'httpc_options_t' with them when porting
- * to a new platform (ie. Not Unix or Windows) - return negative on failure, 
- * zero (HTTPC_OK) on success, and for open/close/read/write return HTTPC_YIELD 
+ * to a new platform (ie. Not Unix or Windows) - return negative on failure,
+ * zero (HTTPC_OK) on success, and for open/close/read/write return HTTPC_YIELD
  * if you want the client to yield to its' caller. */
 HTTPC_API extern int httpc_open(void **socket, httpc_options_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
 HTTPC_API extern int httpc_close(void *socket, httpc_options_t *a);

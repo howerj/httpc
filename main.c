@@ -2,7 +2,7 @@
  * Author:     Richard James Howe
  * License:    The Unlicense
  * Email:      howe.r.j.89@gmail.com
- * Repository: https://github.com/howerj/httpc 
+ * Repository: https://github.com/howerj/httpc
  *
  * Example driver for library. */
 
@@ -186,7 +186,7 @@ static int yield1(int (*cb)(httpc_options_t *, const char *, httpc_callback, voi
 	assert(a);
 	assert(url);
 	int r = HTTPC_YIELD;
-	for (;r > HTTPC_OK;) {
+	for (;r == HTTPC_YIELD;) {
 		r = cb(a, url, fn, param);
 		if (r == HTTPC_YIELD && a->flags & HTTPC_OPT_LOGGING_ON)
 			(void)fprintf(stderr, "(yield)\n");
@@ -201,7 +201,7 @@ static int yield2(int (*cb)(httpc_options_t *, const char *), httpc_options_t *a
 	assert(a);
 	assert(url);
 	int r = HTTPC_YIELD;
-	for (;r > HTTPC_OK;) {
+	for (;r == HTTPC_YIELD;) {
 		r = cb(a, url);
 		if (r == HTTPC_YIELD && a->flags & HTTPC_OPT_LOGGING_ON)
 			(void)fprintf(stderr, "(yield)\n");
@@ -234,7 +234,7 @@ int main(int argc, char **argv) {
 	char *arg_custom[argc];
 	const char *url = NULL;
 	httpc_getopt_t opt = { .init = 0, };
-	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:1vyH:")) != -1) {
+	while ((ch = httpc_getopt(&opt, argc, argv, "htu:o:1vykH:")) != -1) {
 		switch (ch) {
 		default: /* fall-through */
 		case 'h': return help(stderr, argv[0]), 0;
@@ -244,6 +244,7 @@ int main(int argc, char **argv) {
 		case 'v': a.flags |= HTTPC_OPT_LOGGING_ON; break;
 		case '1': a.flags |= HTTPC_OPT_HTTP_1_0; break;
 		case 'y': a.flags |= HTTPC_OPT_NON_BLOCKING; break;
+		case 'k': a.flags |= HTTPC_OPT_REUSE; break;
 		case 'H': arg_custom[arg_custom_count++] = opt.arg; break;
 		}
 	}

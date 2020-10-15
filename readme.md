@@ -20,19 +20,20 @@ httpc -o PUT example.com < file.txt
 	License:    The Unlicense
 	Repository: <https://github.com/howerj/httpc>
 
-This library implements a small HTTP(S) client that can be used for downloading files 
-and firmware on an embedded platform. The demonstration code targets [linux][] and 
+This library implements a small HTTP(S) client that can be used for downloading files
+and firmware on an embedded platform. The demonstration code targets [linux][] and
 [windows][] platforms.
 
 The non-portable code for dealing with the [socket][] and [SSL/TLS][] layers must be
 provided by the user and are not contained within the HTTPC library.
-[SSL/TLS][] support is entirely optional.  The dependency on the C standard library 
-is minimal and the allocator used by the HTTPC library can be provided by the 
-user to aid in porting. The data is passed to a user supplied callback.
+[SSL/TLS][] support is entirely optional.  The dependency on the C standard library
+is minimal (mostly string functions) and the allocator used by the HTTPC library
+can be provided by the user to aid in porting. The data is passed to a user supplied
+callback.
 
 The library implements a retry mechanism and enough of [HTTP 1.1][] to allow
 partially downloaded files to be resumed. This allows for a more reliable file
-transfer over a bad network connection than [HTTP 1.0][] allows. A simple 
+transfer over a bad network connection than [HTTP 1.0][] allows. A simple
 [HTTP 1.0][] client is almost trivial to implement, however it is not very
 reliable. Only certain operations are retried in full with a resume
 ("GET"/"HEAD"), others are not retried if a negative response is received
@@ -72,7 +73,7 @@ Examples:
 # C API
 
 There are only a handful of functions required to be implemented in order to
-port this client. If your platform has a [TCP/IP][] stack with a 
+port this client. If your platform has a [TCP/IP][] stack with a
 [Berkeley sockets][] like [API][] then porting should be trivial.
 
 # BUILDING
@@ -142,8 +143,8 @@ Known limitations include:
 * The set of functions provided by this library should suite the common cases,
   however somethings are not supported, for example a GET request can have a
   body, but there is no way to handle this.
-* Entropy cannot be reversed, meaning all acts of man no matter how great will 
-  eventually be rendered futile, the best one can hope for is eternal return, 
+* Entropy cannot be reversed, meaning all acts of man no matter how great will
+  eventually be rendered futile, the best one can hope for is eternal return,
   are you proud of what you have achieved? Or will you die like a dog in the
   face of heat-death?
 
@@ -152,7 +153,7 @@ Known limitations include:
 For any bugs please contact the author at <mailto:howe.r.j.89@gmail.com>.
 Please include as much information as possible including, but not limited to:
 information on what platform you are compiling your code on (OS, 32/64-bit,
-...), tracing information (for example, valgrind output), a minimal test 
+...), tracing information (for example, valgrind output), a minimal test
 case, thoughts, comments and general rants. Alternatively shout into a buck or
 pray to your gods.
 

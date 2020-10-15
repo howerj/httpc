@@ -54,9 +54,9 @@ typedef struct {
 	size_t allocated, used; /* number of bytes allocates, number of byte actually used */
 } buffer_t; /* growable buffer, also used for memory optimization reasons */
 
-typedef struct { 
-	char *buffer; 
-	size_t length, used; 
+typedef struct {
+	char *buffer;
+	size_t length, used;
 } buffer_cb_t; /* used in PUT/POST/GET to memory functions */
 
 typedef unsigned long length_t;
@@ -85,6 +85,7 @@ struct httpc {
 		 redirect      :1, /* if set then a redirect is going on */
 		 length_set    :1, /* has length been set on a PUT/POST? */
 		 open          :1, /* is the file handle open? */
+		 keep_alive    :1, /* does the server support keep-alive? */
 		 progress      :1; /* are we making progress? */
 };
 
@@ -128,6 +129,11 @@ static int httpc_is_dead(httpc_t *h) {
 static int httpc_is_yield_on(httpc_t *h) {
 	assert(h);
 	return !!(h->os.flags & HTTPC_OPT_NON_BLOCKING);
+}
+
+static int httpc_is_reuse(httpc_t *h) {
+	assert(h);
+	return !!(h->os.flags & HTTPC_OPT_REUSE);
 }
 
 #ifdef __GNUC__
@@ -552,8 +558,13 @@ static int httpc_request_send_header(httpc_t *h, buffer_t *b0, int op) {
 		}
 	}
 
-	if (buffer_add_string(h, b0, "Connection: Close\r\n") < 0)
-		goto fail;
+	if (httpc_is_reuse(h)) {
+		if (buffer_add_string(h, b0, "Connection: keep-alive\r\n") < 0)
+			goto fail;
+	} else {
+		if (buffer_add_string(h, b0, "Connection: close\r\n") < 0)
+			goto fail;
+	}
 	if (buffer_add_string(h, b0, "Accept-Encoding: identity\r\n") < 0)
 		goto fail;
 	if (h->userpass) {
@@ -627,6 +638,16 @@ static inline int httpc_case_insensitive_compare(const char *a, const char *b, c
 	return 0;
 }
 
+static const char *httpc_case_insensitive_search(const char *haystack, const char *needle) {
+	assert(haystack);
+	assert(needle);
+	const size_t needle_length = strlen(needle);
+	for (; *haystack; haystack++)
+		if (0 == httpc_case_insensitive_compare(haystack, needle, needle_length))
+			return haystack;
+	return NULL;
+}
+
 /* NB. We could add in a callback to handle unknown fields, however we would
  * need to add infrastructure so an external user could meaningfully interact
  * with the library internals, which would be too invasive. */
@@ -643,6 +664,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 	X("Transfer-Encoding:", FLD_TRANSFER_ENCODING) \
 	X("Content-Length:",    FLD_CONTENT_LENGTH)\
 	X("Accept-Ranges:",     FLD_ACCEPT_RANGES)\
+	X("Connection:",        FLD_CONNECTION)\
 	X("Location:",          FLD_REDIRECT)
 
 	enum {
@@ -668,13 +690,14 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			continue;
 		if (httpc_case_insensitive_compare(fld->name, line, fld->length))
 			continue;
+		/* NB. Using 'httpc_case_insensitive_search' is a little too liberal in our input handling */
 		switch (fld->type) {
 		case FLD_ACCEPT_RANGES:
-			if (strstr(line, "bytes")) {
+			if (httpc_case_insensitive_search(line, "bytes")) {
 				h->accept_ranges = !!(h->os.flags & HTTPC_OPT_HTTP_1_0);
 				return info(h, "Accept-Ranges: bytes");
 			}
-			if (strstr(line, "none")) {
+			if (httpc_case_insensitive_search(line, "none")) {
 				h->accept_ranges = 0;
 				return info(h, "Accept-Ranges: none");
 			}
@@ -682,16 +705,26 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 		case FLD_TRANSFER_ENCODING:
 			if (strchr(line, ','))
 				return error(h, "Transfer encoding too complex, cannot handle it: %s", line);
-			if (strstr(line, "identity")) {
+			if (httpc_case_insensitive_search(line, "identity")) {
 				h->identity = 1;
 				h->position = 0;
 				return info(h, "identity transfer encoding");
 			}
-			if (strstr(line, "chunked")) { /* chunky monkey setting */
+			if (httpc_case_insensitive_search(line, "chunked")) { /* chunky monkey setting */
 				h->identity = 0;
 				return info(h, "chunked transfer encoding");
 			}
 			return error(h, "cannot handle transfer encoding: %s", line);
+		case FLD_CONNECTION:
+			if (httpc_case_insensitive_search(line, "close")) {
+				h->keep_alive = 0;
+				return info(h, "connection close mandatory");
+			}
+			if (httpc_case_insensitive_search(line, "keep-alive")) {
+				h->keep_alive = 1;
+				return info(h, "connection may be kept alive");
+			}
+			return error(h, "unknown connection type");
 		case FLD_CONTENT_LENGTH:
 			if (scan_number(&line[fld->length], &h->length, 10) < 0)
 				return error(h, "invalid content length: %s", line);
@@ -815,7 +848,8 @@ static int httpc_parse_response_header(httpc_t *h, buffer_t *b0) {
 	h->length = 0;
 	h->identity = 1;
 	h->length_set = 0;
-	h->accept_ranges = !!(h->os.flags & HTTPC_OPT_HTTP_1_0);
+	h->keep_alive = !(h->os.flags & HTTPC_OPT_HTTP_1_0);
+	h->accept_ranges = !(h->os.flags & HTTPC_OPT_HTTP_1_0);
 	b0->used = 0;
 
 	length = b0->allocated;
@@ -870,7 +904,7 @@ static int httpc_parse_response_body_identity(httpc_t *h, buffer_t *b0) {
 		size_t length = b0->allocated;
 		if (httpc_network_read(h, b0->buffer, &length) < 0)
 			return error(h, "read error");
-		if (length == 0)
+		if (length == 0) /* NB. We could also check if content length has been set to zero */
 			break;
 		if ((h->position + length) < h->position)
 			return fatal(h, "overflow in length");
@@ -926,7 +960,7 @@ static int httpc_parse_response_body_chunked(httpc_t *h, buffer_t *b0) {
 			nl = 1;
 			if (httpc_network_read(h, b0->buffer, &nl) < 0 || nl != 1)
 				return HTTPC_ERROR;
-		} 
+		}
 		if (b0->buffer[0] != '\n')
 			return HTTPC_ERROR;
 		if (httpc_is_yield_on(h))
@@ -1011,9 +1045,9 @@ static inline int banner(httpc_t *h) {
 	info(h, "Repo:    "REPO);
 	info(h, "Author:  "AUTHOR);
 	info(h, "Email:   "EMAIL);
-	info(h, "Options: stk=%lu tst=%u grw=%u log=%u cons=%u redirs=%u hmax=%lu sz=%u", 
-		HTTPC_STACK_BUFFER_SIZE, HTTPC_TESTS_ON, HTTPC_GROW, 
-		HTTPC_LOGGING, HTTPC_CONNECTION_ATTEMPTS, HTTPC_REDIRECT_MAX, 
+	info(h, "Options: stk=%lu tst=%u grw=%u log=%u cons=%u redirs=%u hmax=%lu sz=%u",
+		HTTPC_STACK_BUFFER_SIZE, HTTPC_TESTS_ON, HTTPC_GROW,
+		HTTPC_LOGGING, HTTPC_CONNECTION_ATTEMPTS, HTTPC_REDIRECT_MAX,
 		HTTPC_MAX_HEADER, (unsigned)(sizeof *h));
 	return info(h, "License: "LICENSE);
 }
@@ -1045,11 +1079,11 @@ next_state:
 		h->state = SM_DONE;
 	switch (h->state) {
 	case SM_INIT:
-		next = SM_OPEN;
-		h->open = 0;
+		next        = SM_OPEN;
+		h->open     = 0;
 		h->progress = 0;
-		if (h->os.flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING)) {
-			h->status = fatal(h, "unknown option provided %u", h->os.flags); 
+		if (h->os.flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING | HTTPC_OPT_REUSE)) {
+			h->status = fatal(h, "unknown option provided %u", h->os.flags);
 			next      = SM_DONE;
 		}
 		if (h->os.time(&h->start_ms) < 0) {
@@ -1070,6 +1104,10 @@ next_state:
 		break;
 	case SM_OPEN: {
 		next = SM_SNDH;
+		implies(h->open, httpc_is_reuse(h));
+		implies(h->open, h->keep_alive);
+		if (h->open) /* reuse connection */
+			break;
 		const int y = h->os.open(&h->socket, &h->os, h->os.socketopts, h->domain, h->port, h->use_ssl);
 		if (y == HTTPC_OK)
 			h->open = 1;
@@ -1079,7 +1117,7 @@ next_state:
 			next = SM_BCKO;
 		break;
 	}
-	case SM_SNDH: { 
+	case SM_SNDH: {
 		next = SM_SNDB;
 		const int y = httpc_request_send_header(h, &h->b0, op);
 		if (y < 0)
@@ -1088,16 +1126,15 @@ next_state:
 			next = SM_SNDH;
 		break;
 	}
-	case SM_SNDB: 
+	case SM_SNDB: {
 		next = SM_RCVH;
-		if (op == HTTPC_POST || op == HTTPC_PUT) {
-			const int y = httpc_generate_request_body(h, &h->b0);
-			if (y < 0)
-				next = SM_BCKO;
-			if (y == HTTPC_YIELD)
-				next = SM_SNDB;
-		}
+		const int y = httpc_generate_request_body(h, &h->b0);
+		if (y < 0)
+			next = SM_BCKO;
+		else if (y == HTTPC_YIELD)
+			next = SM_SNDB;
 		break;
+	}
 	case SM_RCVH: {
 		next = SM_RCVB;
 		const int y = httpc_parse_response_header(h, &h->b0);
@@ -1120,7 +1157,7 @@ next_state:
 		}
 		break;
 	}
-	case SM_RCVB: 
+	case SM_RCVB:
 		next = SM_DONE;
 		if (op == HTTPC_GET) {
 			const length_t pos = h->position;
@@ -1134,14 +1171,26 @@ next_state:
 			}
 		}
 		break;
-	case SM_REDR: 
-		h->open = 0;
-		(void)h->os.close(h->socket, &h->os);
-		h->redirect = 0;
+	case SM_REDR:
 		next = SM_OPEN;
+		if (h->os.close(h->socket, &h->os) == HTTPC_YIELD) {
+			next = SM_REDR;
+		} else { /* do not care about errors -- only yield */
+			h->open = 0;
+			h->redirect = 0;
+		}
 		break;
 	case SM_BCKO:
 		next = SM_SLEP;
+		if (h->open) {
+			if (h->os.close(h->socket, &h->os) == HTTPC_YIELD) {
+				next = SM_BCKO;
+				break; /* !! */
+			} else { /* do not care about errors -- only yield */
+				h->open = 0;
+			}
+		}
+
 		if (h->retries >= h->retries_max) {
 			h->status = HTTPC_ERROR;
 			next      = SM_DONE;
@@ -1150,11 +1199,7 @@ next_state:
 		h->retries += !(h->progress);
 		h->progress = 0;
 		h->redirect = 0;
-		if (h->open) {
-			h->open = 0;
-			(void)h->os.close(h->socket, &h->os);
-		}
-		h->socket = NULL;
+
 		if (h->os.time(&h->current_ms) < 0) {
 			h->status = fatal(h, "unable to get time");
 			next = SM_DONE;
@@ -1172,10 +1217,21 @@ next_state:
 		break;
 	}
 	case SM_DONE:
+		h->retries   = 0;
+		h->redirects = 0;
 		if (h->open) {
-			h->open = 0;
-			if (h->os.close(h->socket, &h->os) < 0)
-				h->status = HTTPC_ERROR;
+			if (httpc_is_reuse(h) && !httpc_is_dead(h) && h->status == HTTPC_OK && h->keep_alive) {
+				next =  SM_OPEN;
+				h->state = next; /* !! */
+				return HTTPC_REUSE; /* !! */
+			}
+			if (h->os.close(h->socket, &h->os) == HTTPC_YIELD) {
+				/* stay in the same state */
+				break; /* !! */
+			} else { /* do not care about errors -- only yield */
+				h->open   = 0;
+				h->socket = NULL;
+			}
 		}
 		h->url = NULL;
 		if (buffer_free(h, &h->b0) < 0)
@@ -1194,10 +1250,9 @@ next_state:
 			status = HTTPC_ERROR;
 		assert(status != HTTPC_YIELD);
 		assert(status <= HTTPC_OK);
-		return dead ? dead : status;
-	default: 
-		httpc_kill(h);
-		h->status = HTTPC_ERROR;
+		return dead ? HTTPC_ERROR : status;
+	default:
+		h->status = httpc_kill(h);
 		next      = SM_DONE;
 		break;
 	}
@@ -1231,7 +1286,7 @@ static int httpc_op_non_blocking(httpc_options_t *a, const char *url, int op, ht
 		h->snd       = snd;
 		h->rcv_param = rcv_param;
 		h->snd_param = snd_param;
-	} 
+	}
 	const int r = httpc_state_machine(h, url, op);
 	if (r != HTTPC_YIELD)
 		a->state = NULL; /* make sure this is not reused */
@@ -1253,7 +1308,6 @@ int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *para
 	return httpc_operation(a, url, HTTPC_GET, fn, param, NULL, NULL);
 }
 
-/* TODO: This put is a little buggy around the input and response handling */
 int httpc_put(httpc_options_t *a, const char *url, httpc_callback fn, void *param) {
 	assert(a);
 	assert(url);
@@ -1315,7 +1369,7 @@ static int httpc_put_buffer_cb(void *param, unsigned char *buf, size_t length, s
 	return copy;
 }
 
-/* TODO: Implement non-blocking versions */
+/* NB. These could be made to be non-blocking as well, but it is too much effort */
 int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *length) {
 	assert(url);
 	assert(a);
