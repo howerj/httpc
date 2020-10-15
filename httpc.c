@@ -1369,14 +1369,18 @@ static int httpc_put_buffer_cb(void *param, unsigned char *buf, size_t length, s
 	return copy;
 }
 
+static inline int httpc_buffer_unsupported(httpc_options_t *a) {
+	assert(a);
+	return !!(a->flags & HTTPC_OPT_NON_BLOCKING) || !!(a->flags & HTTPC_OPT_REUSE);
+}
+
 /* NB. These could be made to be non-blocking as well, but it is too much effort */
 int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *length) {
 	assert(url);
 	assert(a);
 	assert(buffer);
 	assert(length);
-	const int yield = !!(a->flags & HTTPC_OPT_NON_BLOCKING);
-	if (yield)
+	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
 	buffer_cb_t param = { .buffer = buffer, .length = *length, };
 	*length  = 0;
@@ -1390,8 +1394,7 @@ int httpc_put_buffer(httpc_options_t *a, const char *url, char *buffer, size_t l
 	assert(url);
 	assert(a);
 	assert(buffer);
-	const int yield = !!(a->flags & HTTPC_OPT_NON_BLOCKING);
-	if (yield)
+	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
 	buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
 	return httpc_op_blocking(a, url, HTTPC_PUT, NULL, NULL, httpc_put_buffer_cb, &param);
@@ -1401,8 +1404,7 @@ int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t 
 	assert(url);
 	assert(a);
 	assert(buffer);
-	const int yield = !!(a->flags & HTTPC_OPT_NON_BLOCKING);
-	if (yield)
+	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
 	buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
 	return httpc_op_blocking(a, url, HTTPC_POST, NULL, NULL, httpc_put_buffer_cb, &param);

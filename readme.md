@@ -43,6 +43,12 @@ There are other libraries that do something similar, however they tend to be
 larger, more complex and more complete. [cURL][] is an example of one such
 program and library - if you do decided to use it, good luck porting it!
 
+Use cases:
+
+* Downloading firmware over an unreliable connection.
+* Poking a web-server with data.
+* Talking to a known, trusted server.
+
 # EXAMPLE USAGE
 
 	Usage: ./httpc [-ht] *OR* -[1vy] -u URL *OR* -[1vy] URL
@@ -75,6 +81,62 @@ Examples:
 There are only a handful of functions required to be implemented in order to
 port this client. If your platform has a [TCP/IP][] stack with a
 [Berkeley sockets][] like [API][] then porting should be trivial.
+
+The functions all return negative on failure, zero on successful completion of
+an operation or session, and there are some positive values that are used to to
+signal special cases (such as the HTTP client yielding to the caller,
+"HTTPC\_YIELD"), or the operation is finished but the connection is open
+("HTTPC\_REUSE" is returned). Both of these special return values are not
+encountered unless enabled, which by default they are not.
+
+For each connection a "httpc\_options\_t" structure must be readied, which will
+contain the callbacks needed to connect to the web-server, and to allocate
+memory. Very little memory is allocated, non-blocking memory operations use
+allocate more on the heap, but blocking operations use more stack space.
+Allocation is only done during session setup usually, and should not grow
+during normal operation.
+
+The following functions support non-blocking modes of operation, and reusing
+the HTTP connection after successful requests (unsuccessful requests cause the
+connection to be closed, and reopened, as do redirects).
+
+	int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *param);
+	int httpc_put(httpc_options_t *a, const char *url, httpc_callback fn, void *param);
+	int httpc_post(httpc_options_t *a, const char *url, httpc_callback fn, void *param);
+	int httpc_head(httpc_options_t *a, const char *url);
+	int httpc_delete(httpc_options_t *a, const char *url);
+	int httpc_trace(httpc_options_t *a, const char *url);
+	int httpc_options(httpc_options_t *a, const char *url);
+
+The callback for the GET operation is called only when receiving the response
+body. Likewise the callback for the PUT operation is only called when sending
+the request body. All operations can optionally have both requests and response
+bodies according to the specification, but there is no way to deal with both
+(to keep things simple).
+
+"httpc\_head", "httpc\_trace", and "httpc\_options" are really
+only useful for interactive debugging purposes when logging is turned on. It is
+expected that they will not be used on an embedded platform.
+
+These functions support blocking operations only, and do not support reusing
+the connection:
+
+	int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *length);
+	int httpc_put_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length);
+	int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length);
+
+The above functions are for reading into a buffer (GET) writing from a buffer
+(PUT, POST). GET expects the length of the buffer to be passed into 'length',
+and it returns the actual length of the data retrieved in 'length'. If the
+buffer is not big enough an error is returned.
+
+The "httpc\_tests" function executes a series of built in unit tests, they may
+be compiled out with the right define to save on space.
+
+	int httpc_tests(httpc_options_t *a);
+
+You should not normally need to run this function. Negative is returned on
+error, as usual.
 
 # BUILDING
 
