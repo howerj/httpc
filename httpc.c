@@ -579,6 +579,8 @@ static int httpc_request_send_header(httpc_t *h, buffer_t *b0, int op) {
 			goto fail;
 	}
 
+	/* NB. We could split up the writes by instead calling 'httpc_network_write' instead 
+	 * of 'buffer_add_string' if we wanted. It has some advantages. */
 	assert(b0->used > 0u);
 	if (httpc_network_write(h, b0->buffer, b0->used - 1u) < 0)
 		goto fail;
@@ -904,7 +906,7 @@ static int httpc_parse_response_body_identity(httpc_t *h, buffer_t *b0) {
 		size_t length = b0->allocated;
 		if (httpc_network_read(h, b0->buffer, &length) < 0)
 			return error(h, "read error");
-		if (length == 0) /* NB. We could also check if content length has been set to zero */
+		if (length == 0)
 			break;
 		if ((h->position + length) < h->position)
 			return fatal(h, "overflow in length");
@@ -912,6 +914,8 @@ static int httpc_parse_response_body_identity(httpc_t *h, buffer_t *b0) {
 			return HTTPC_ERROR;
 		h->position += length;
 		h->max = MAX(h->max, h->position);
+		if (h->length_set && h->position >= h->length)
+			return HTTPC_OK;
 		if (httpc_is_yield_on(h))
 			return HTTPC_YIELD;
 	}
@@ -1221,7 +1225,7 @@ next_state:
 		h->redirects = 0;
 		if (h->open) {
 			if (httpc_is_reuse(h) && !httpc_is_dead(h) && h->status == HTTPC_OK && h->keep_alive) {
-				next =  SM_OPEN;
+				next     = SM_OPEN;
 				h->state = next; /* !! */
 				return HTTPC_REUSE; /* !! */
 			}
@@ -1249,6 +1253,7 @@ next_state:
 		if (httpc_free(h, f) < 0)
 			status = HTTPC_ERROR;
 		assert(status != HTTPC_YIELD);
+		assert(status != HTTPC_REUSE);
 		assert(status <= HTTPC_OK);
 		return dead ? HTTPC_ERROR : status;
 	default:
@@ -1264,14 +1269,30 @@ next_state:
 	return HTTPC_YIELD;
 }
 
-static int httpc_op_blocking(httpc_options_t *a, const char *url, int op, httpc_callback rcv, void *rcv_param, httpc_callback snd, void *snd_param) {
+int httpc_end_session(httpc_options_t *a) {
+	assert(a);
+	if (!(a->state))
+		return HTTPC_OK;
+	httpc_t *h = a->state;
+	h->state = SM_DONE;
+	(void)info(h, "end-session");
+	(void)httpc_kill(h);
+	for (;httpc_state_machine(h, "", HTTPC_GET) == HTTPC_YIELD;)
+		;
+	a->state = NULL;
+	return HTTPC_OK;
+}
+
+static int httpc_op_stack(httpc_options_t *a, const char *url, int op, httpc_callback rcv, void *rcv_param, httpc_callback snd, void *snd_param) {
 	if (a->state)
 		return HTTPC_ERROR;
 	httpc_t h = { .os = *a, .rcv = rcv, .rcv_param = rcv_param, .snd = snd, .snd_param = snd_param, };
+	assert(httpc_is_yield_on(&h) == 0);
+	assert(httpc_is_reuse(&h)    == 0);
 	return httpc_state_machine(&h, url, op);
 }
 
-static int httpc_op_non_blocking(httpc_options_t *a, const char *url, int op, httpc_callback rcv, void *rcv_param, httpc_callback snd, void *snd_param) {
+static int httpc_op_heap(httpc_options_t *a, const char *url, int op, httpc_callback rcv, void *rcv_param, httpc_callback snd, void *snd_param) {
 	assert(a);
 	assert(url);
 	httpc_t *h = a->state;
@@ -1288,7 +1309,7 @@ static int httpc_op_non_blocking(httpc_options_t *a, const char *url, int op, ht
 		h->snd_param = snd_param;
 	}
 	const int r = httpc_state_machine(h, url, op);
-	if (r != HTTPC_YIELD)
+	if (r != HTTPC_YIELD && r != HTTPC_REUSE)
 		a->state = NULL; /* make sure this is not reused */
 	return r;
 }
@@ -1297,9 +1318,10 @@ static int httpc_operation(httpc_options_t *a, const char *url, int op, httpc_ca
 	assert(a);
 	assert(url);
 	const int yield = !!(a->flags & HTTPC_OPT_NON_BLOCKING);
-	if (yield)
-		return httpc_op_non_blocking(a, url, op, rcv, rcv_param, snd, snd_param);
-	return httpc_op_blocking(a, url, op, rcv, rcv_param, snd, snd_param);
+	const int reuse = !!(a->flags & HTTPC_OPT_REUSE);
+	if (yield || reuse)
+		return httpc_op_heap(a, url, op, rcv, rcv_param, snd, snd_param);
+	return httpc_op_stack(a, url, op, rcv, rcv_param, snd, snd_param);
 }
 
 int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *param) {
@@ -1384,7 +1406,7 @@ int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *
 		return HTTPC_ERROR;
 	buffer_cb_t param = { .buffer = buffer, .length = *length, };
 	*length  = 0;
-	const int r = httpc_op_blocking(a, url, HTTPC_GET, httpc_get_buffer_cb, &param, NULL, NULL);
+	const int r = httpc_op_stack(a, url, HTTPC_GET, httpc_get_buffer_cb, &param, NULL, NULL);
 	if (r == HTTPC_OK)
 		*length = param.used;
 	return r;
@@ -1397,7 +1419,7 @@ int httpc_put_buffer(httpc_options_t *a, const char *url, char *buffer, size_t l
 	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
 	buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
-	return httpc_op_blocking(a, url, HTTPC_PUT, NULL, NULL, httpc_put_buffer_cb, &param);
+	return httpc_op_stack(a, url, HTTPC_PUT, NULL, NULL, httpc_put_buffer_cb, &param);
 }
 
 int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length) {
@@ -1407,7 +1429,7 @@ int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t 
 	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
 	buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
-	return httpc_op_blocking(a, url, HTTPC_POST, NULL, NULL, httpc_put_buffer_cb, &param);
+	return httpc_op_stack(a, url, HTTPC_POST, NULL, NULL, httpc_put_buffer_cb, &param);
 }
 
 static inline int httpc_testing_sleep(unsigned long milliseconds) {

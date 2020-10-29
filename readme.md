@@ -138,6 +138,15 @@ be compiled out with the right define to save on space.
 You should not normally need to run this function. Negative is returned on
 error, as usual.
 
+The function "httpc\_end\_session";
+
+	int httpc_end_session(httpc_options_t *a);
+
+Is only needed when using the yield option and you want to end a HTTP operation
+prematurely, or when using the keep-alive options and you want to finally close
+the connection. It is safe to call this function multiple times, or if those
+options are not set.
+
 # BUILDING
 
 To build you will need a [C99][] compiler and [GNU Make][]. There are minimal
