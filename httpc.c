@@ -231,7 +231,8 @@ static int httpc_network_read(httpc_t *h, unsigned char *bytes, size_t *length) 
 static int httpc_network_write(httpc_t *h, const unsigned char *bytes, size_t length) {
 	assert(h);
 	assert(bytes);
-	assert(length);
+	if (length == 0)
+		return HTTPC_OK;
 	size_t l = length;
 	const int r = h->os.write(h->socket, bytes, &l);
 	if (l != length)
