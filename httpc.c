@@ -3,8 +3,8 @@
 #define AUTHOR  "Richard James Howe"
 #define EMAIL   "howe.r.j.89@gmail.com"
 #define REPO    "https://github.com/howerj/httpc"
-#ifndef HTTPC_VERSION
-#define HTTPC_VERSION "0.0.0" /* defined by build system */
+#ifndef VERSION
+#define VERSION "0.0.0" /* defined by build system */
 #endif
 #include "httpc.h"
 #include <assert.h>

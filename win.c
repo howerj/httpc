@@ -89,10 +89,10 @@ static int ssl_open(socket_t *s, httpc_options_t *a, const char *domain) {
 	/* Better error logging could be done here... */
 	if (SSL_connect(s->ssl) != 1)
 		goto fail;
-#endif
 	return HTTPC_OK;
 fail:
 	return HTTPC_ERROR;
+#endif
 }
 
 /* NB. read/write do not check if we can retry - too lazy atm to do so */
