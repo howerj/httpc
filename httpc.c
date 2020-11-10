@@ -187,21 +187,24 @@ static inline int rcode(const int c) { return c; } /* suppresses warnings */
 static void *httpc_malloc(httpc_t *h, const size_t size) {
 	assert(h);
 	assert(h->os.allocator);
-	(void)debug(h, "allocate %ld bytes", (long)size);
 	if (httpc_is_dead(h))
 		return NULL;
 	void *r = h->os.allocator(h->os.arena, NULL, 0, size);
 	if (!r) {
 		(void)httpc_kill(h);
+		(void)debug(h, "malloc %ld failed", (long)size);
 		return NULL;
 	}
-	return memset(r, 0, size);
+	void *m = memset(r, 0, size);
+	(void)debug(h, "malloc %p/%ld", m, (long)size);
+	return m;
 }
 
 static void *httpc_realloc(httpc_t *h, void *pointer, const size_t size) {
 	assert(h);
 	assert(h->os.allocator);
-	if (httpc_is_dead(h))
+	(void)debug(h, "%s %p/%ld", size > 0 ? "realloc" : "free", pointer, (long)size);
+	if (httpc_is_dead(h) && size > 0)
 		return NULL;
 	void *r = h->os.allocator(h->os.arena, pointer, 0, size);
 	if (r == NULL && size != 0)
@@ -212,6 +215,7 @@ static void *httpc_realloc(httpc_t *h, void *pointer, const size_t size) {
 static int httpc_free(httpc_t *h, void *pointer) {
 	assert(h);
 	assert(h->os.allocator);
+	(void)debug(h, "free %p", pointer);
 	(void)h->os.allocator(h->os.arena, pointer, 0, 0);
 	return HTTPC_OK;
 }
