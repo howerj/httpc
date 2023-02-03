@@ -218,6 +218,8 @@ Known limitations include:
   eventually be rendered futile, the best one can hope for is eternal return,
   are you proud of what you have achieved? Or will you die like a dog in the
   face of heat-death?
+* This library does not implement [WebSockets][], but looking through the
+  specification, they should be fairly easy to implement.
 
 # BUGS
 
@@ -228,6 +230,7 @@ information on what platform you are compiling your code on (OS, 32/64-bit,
 case, thoughts, comments and general rants. Alternatively shout into a buck or
 pray to your gods.
 
+[WebSockets]: https://en.wikipedia.org/wiki/WebSocket
 [linux]: https://www.linux.org/
 [windows]: https://www.microsoft.com/en-gb/windows
 [socket]: https://en.wikipedia.org/wiki/Network_socket
