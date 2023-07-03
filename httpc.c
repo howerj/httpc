@@ -1016,7 +1016,9 @@ static int httpc_generate_request_body(httpc_t *h, buffer_t *b0) {
 			char n[64 + 1] = { 0, };
 			assert(r < INT_MAX);
 			const unsigned l = num_to_str(n, r, 16);
-			if (httpc_network_write(h, (unsigned char*)n, l) < 0) {
+			assert((l + 2) <= sizeof (n));
+			memcpy(&n[l], "\r\n", 3);
+			if (httpc_network_write(h, (unsigned char*)n, l + 2) < 0) {
 				r = error(h, "write failed");
 				break;
 			}

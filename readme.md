@@ -202,6 +202,8 @@ Known limitations include:
   into a fully non-blocking version is a non-trivial task. See
   <https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html> for both
   a description of the problem and a possible solution in C.
+* The library should be fuzzed, and has not been. Preferably with something
+  like [AFL](https://lcamtuf.coredump.cx/afl/).
 * The library is quite thirsty for stack size for a library meant to be run on
   an embedded microcontroller. It will require at least 1KiB of stack, and
   possibly more depending on how your callbacks are written.
