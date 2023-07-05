@@ -159,7 +159,7 @@ Options:\n\n\
 \n\
 Returns non zero value on failure. stdin(3) for input, stdout(3)\n\
 for output, and stderr(3) for logging\n\n";
-	return fprintf(out, fmt, arg0, VERSION);
+	return fprintf(out, fmt, arg0, HTTPC_VERSION);
 }
 
 enum { OP_GET, OP_HEAD, OP_PUT, OP_POST, OP_DELETE, OP_TRACE, OP_OPTIONS, };

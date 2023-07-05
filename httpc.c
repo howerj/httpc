@@ -1,16 +1,19 @@
-#define PROGRAM "Embeddable HTTP 1.0/1.1 client"
-#define LICENSE "The Unlicense (public domain)"
-#define AUTHOR  "Richard James Howe"
-#define EMAIL   "howe.r.j.89@gmail.com"
-#define REPO    "https://github.com/howerj/httpc"
-#ifndef VERSION
-#define VERSION "0.0.0" /* defined by build system */
+#define HTTPC_PROGRAM "Embeddable HTTP 1.0/1.1 client"
+#define HTTPC_LICENSE "The Unlicense (public domain)"
+#define HTTPC_AUTHOR  "Richard James Howe"
+#define HTTPC_EMAIL   "howe.r.j.89@gmail.com"
+#define HTTPC_REPO    "https://github.com/howerj/httpc"
+#ifndef HTTPC_VERSION
+#define HTTPC_VERSION "0.0.0" /* defined by build system */
 #endif
 #include "httpc.h"
+#define LOCALELY_API static inline
+#define LOCALELY_EXTERN LOCALELY_API
+#define LOCALELY_IMPLEMENTATION
+#include "localely.h" /* used because isX and toupper are locale dependent and thus suck */
 #include <assert.h>
 #include <string.h>
 #include <stdint.h>
-#include <ctype.h>
 #include <limits.h>
 
 #ifndef HTTPC_STACK_BUFFER_SIZE /* buffers allocated on the stack, responsible for some arbitrary limits as well. */
@@ -52,32 +55,44 @@ typedef struct {
 	unsigned char stack[HTTPC_STACK_BUFFER_SIZE]; /* small temporary buffer */
 	unsigned char *buffer;                        /* either points to buf or is allocated */
 	size_t allocated, used; /* number of bytes allocates, number of byte actually used */
-} buffer_t; /* growable buffer, also used for memory optimization reasons */
+} httpc_buffer_t; /* growable buffer, also used for memory optimization reasons */
 
 typedef struct {
 	char *buffer;
 	size_t length, used;
-} buffer_cb_t; /* used in PUT/POST/GET to memory functions */
+} httpc_buffer_cb_t; /* used in PUT/POST/GET to memory functions */
 
-typedef unsigned long length_t;
+typedef unsigned long httpc_length_t;
 
 struct httpc {
-	httpc_options_t os;
-	httpc_callback snd, rcv;
-	buffer_t b0, burl; /* buffers for temporary values, heavily reused, be careful! */
-	void *snd_param, *rcv_param;
+	httpc_options_t os; /* operating system dependent functions for socket, TLS/SLL and allocation. */
+	httpc_buffer_t b0, burl; /* buffers for temporary values, heavily reused, be careful! */
+	httpc_callback snd, /* callback for sending payload, called repeatedly to generate output in chunks */
+		       rcv; /* callback for receiving payload, called piecemeal to on chunks of input */
+	void *snd_param, /* parameter given to the "snd" callback */
+	     *rcv_param; /* parameter given to the "rcv" callback */
 	/* These strings point into 'url', which has been modified from the
 	 * original URL to contain a bunch of NUL terminated strings where the
 	 * delimiters were */
-	char *domain /* or IPv4/IPv6 */, *userpass, *path, *url;
-	void *socket;
-	length_t position, length, max;
-	int state, status;
-	unsigned long start_ms, current_ms, end_ms;
-	unsigned retries, redirects; /* retry count, redirect count */
-	unsigned retries_max, redirects_max;
+	char *domain, /* parsed: domain or IPv4/IPv6 */
+	     *userpass, /* parsed: username/password used for basic authentication */
+	     *path, /* parsed: file path */
+	     *url;  /* full URL to be parsed */
+	unsigned short port; /* port to talk on, parsed out at the same time as domain, userpass, path and URL. */
+	void *socket; /* socket used to talk to the server (might actually be an SSL/TLS handle). */
+	httpc_length_t position, /* */
+			length,  /* */
+			max;     /* */
+	int state,  /* HTTPC contains a state-machine, the state of which is encoded here. */
+	    status; /* HTTP return code status */
+	unsigned long start_ms, /* Start time of operation */
+			current_ms, /* Current time, used within exponential back-off operation */
+			end_ms; /* End time of operation */
+	unsigned retries,   /* number of times to connection retried */
+		 redirects; /* number of times to redirected */
+	unsigned retries_max,  /* maximum number of times to retry */
+		 redirects_max; /* maximum number of times to redirect */
 	unsigned response, v1, v2; /* HTTP response, HTTP version (1.0 or 1.1) */
-	unsigned short port;
 	unsigned use_ssl       :1, /* if set then SSL should be used on the connection */
 		 fatal         :1, /* if set then something has gone fatally wrong */
 		 accept_ranges :1, /* if set then the server accepts ranges */
@@ -89,7 +104,7 @@ struct httpc {
 		 progress      :1; /* are we making progress? */
 };
 
-static inline void reverse(char * const r, const size_t length) {
+static inline void httpc_reverse_string(char * const r, const size_t length) {
 	assert(r);
 	const size_t last = length - 1;
 	for (size_t i = 0; i < length / 2ul; i++) {
@@ -99,7 +114,7 @@ static inline void reverse(char * const r, const size_t length) {
 	}
 }
 
-static unsigned num_to_str(char b[64 + 1], unsigned long u, const unsigned long base) {
+static unsigned httpc_num_to_str(char b[64 + 1], unsigned long u, const unsigned long base) {
 	assert(b);
 	assert(base >= 2 && base <= 36);
 	unsigned i = 0;
@@ -111,7 +126,7 @@ static unsigned num_to_str(char b[64 + 1], unsigned long u, const unsigned long 
 		u = r;
 	} while (u);
 	b[i] = '\0';
-	reverse(b, i);
+	httpc_reverse_string(b, i);
 	return i;
 }
 
@@ -143,6 +158,8 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 
 static int httpc_log_fmt(httpc_t *h, const char *fmt, ...) {
 	assert(fmt);
+	assert(h);
+	assert(h->os.logger);
 	va_list ap;
 	va_start(ap, fmt);
 	const int r = h->os.logger(h->os.logfile, fmt, ap);
@@ -156,6 +173,8 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 	assert(h);
 	assert(fmt);
 	if (h->os.flags & HTTPC_OPT_LOGGING_ON) {
+		assert(h->os.logger);
+		assert(type);
 		if (httpc_log_fmt(h, "%s:%u ", type, line) < 0)
 			return HTTPC_ERROR;
 		va_list ap;
@@ -172,10 +191,10 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 }
 
 #if HTTPC_LOGGING == 0
-static inline int rcode(const int c) { return c; } /* suppresses warnings */
-#define debug(H, ...) rcode(HTTPC_OK)
-#define info(H, ...)  rcode(HTTPC_OK)
-#define error(H, ...) rcode(HTTPC_ERROR)
+static inline int httpc_rcode(const int c) { return c; } /* suppresses warnings */
+#define debug(H, ...) httpc_rcode(HTTPC_OK)
+#define info(H, ...)  httpc_rcode(HTTPC_OK)
+#define error(H, ...) httpc_rcode(HTTPC_ERROR)
 #define fatal(H, ...) httpc_kill((H))
 #else
 #define debug(H, ...) httpc_log_line((H), "debug", 0, HTTPC_OK,    __LINE__, __VA_ARGS__)
@@ -259,7 +278,7 @@ static int httpc_read_char(httpc_t *h) {
 	return x;
 }
 
-static int buffer_free(httpc_t *h, buffer_t *s) {
+static int buffer_free(httpc_t *h, httpc_buffer_t *s) {
 	assert(h);
 	assert(s);
 	if (s->buffer != s->stack) {
@@ -271,7 +290,7 @@ static int buffer_free(httpc_t *h, buffer_t *s) {
 	return HTTPC_OK; /* pointer == buffer, no need to free */
 }
 
-static int buffer(httpc_t *h, buffer_t *s, size_t needed) { /* dynamically growable buffer */
+static int httpc_buffer(httpc_t *h, httpc_buffer_t *s, size_t needed) { /* dynamically growable buffer */
 	assert(h);
 	assert(s);
 
@@ -302,7 +321,7 @@ static int buffer(httpc_t *h, buffer_t *s, size_t needed) { /* dynamically growa
 	return HTTPC_OK;
 }
 
-static int buffer_add_string(httpc_t *h, buffer_t *b, const char *s) {
+static int httpc_buffer_add_string(httpc_t *h, httpc_buffer_t *b, const char *s) {
 	assert(h);
 	assert(b);
 	assert(s);
@@ -310,7 +329,7 @@ static int buffer_add_string(httpc_t *h, buffer_t *b, const char *s) {
 		return HTTPC_ERROR;
 	const size_t l = strlen(s);
 	const size_t newsz = l + b->used + !(b->used);
-	if (buffer(h, b, newsz) < 0)
+	if (httpc_buffer(h, b, newsz) < 0)
 		return HTTPC_ERROR;
 	memcpy(b->buffer + b->used - !!(b->used), s, l);
 	b->used = newsz;
@@ -318,17 +337,25 @@ static int buffer_add_string(httpc_t *h, buffer_t *b, const char *s) {
 	return HTTPC_OK;
 }
 
-/* Modified from: <https://stackoverflow.com/questions/342409> */
-static int buffer_add_base64(httpc_t *h, buffer_t *out, const unsigned char *in, const size_t input_length) {
+/* Modified from: <https://stackoverflow.com/questions/342409>.
+ *
+ * This function should be added to the API, along with many others
+ * within this library. However it would need reworking slightly,
+ * perhaps to work on raw buffers only. We would also need to add
+ * a base-64 decode, as it would be odd to have one function without
+ * the other. */
+static int httpc_buffer_add_base64(httpc_t *h, httpc_buffer_t *out, const unsigned char *in, const size_t input_length) {
 	assert(h);
 	assert(in);
 	assert(out);
 	/* assert(shake_it_all_about); */
 	const size_t encoded_length  = 4ull * ((input_length + 2ull) / 3ull);
 	const size_t needs = 1u + encoded_length + out->used;
+	assert(needs > encoded_length);
+	assert(encoded_length > input_length);
 	if (needs < encoded_length)
 		return -1;
-	if (buffer(h, out, needs) < 0)
+	if (httpc_buffer(h, out, needs) < 0)
 		return -1;
 	size_t j = out->used - (out->used != 0);
 	for (size_t i = 0; i < input_length;) {
@@ -342,6 +369,7 @@ static int buffer_add_base64(httpc_t *h, buffer_t *out, const unsigned char *in,
 		const uint32_t octet_b = i < input_length ? (unsigned char)in[i++] : 0;
 		const uint32_t octet_c = i < input_length ? (unsigned char)in[i++] : 0;
 		const uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+		assert(j < (out->allocated - 4));
 		out->buffer[j++] = encoding_table[(triple >> (3 * 6)) & 0x3F];
 		out->buffer[j++] = encoding_table[(triple >> (2 * 6)) & 0x3F];
 		out->buffer[j++] = encoding_table[(triple >> (1 * 6)) & 0x3F];
@@ -350,13 +378,14 @@ static int buffer_add_base64(httpc_t *h, buffer_t *out, const unsigned char *in,
 	static const int mod_table[] = { 0, 2, 1, };
 	for (int i = 0; i < mod_table[input_length % 3]; i++)
 		out->buffer[j - 1u - i] = '=';
+	assert(j < out->allocated);
 	out->buffer[j] = '\0';
 	out->used = j;
 	return 0;
 }
 
-static inline int convert(int ch) {
-	ch = toupper(ch);
+static inline int httpc_character_to_number(int ch) {
+	ch = C_toupper(ch);
 	static const char m[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 	for (int d = 0; d < (int)(sizeof (m) - 1); d++)
 		if (ch == m[d])
@@ -364,21 +393,22 @@ static inline int convert(int ch) {
 	return -1;
 }
 
-static int str_to_num(const char *s, length_t *out, const size_t max, unsigned long base) {
+static int httpc_string_to_number(const char *s, httpc_length_t *out, const size_t max, unsigned long base) {
 	assert(s);
 	assert(out);
-	length_t result = 0;
+	assert(max < SIZE_MAX);
+	httpc_length_t result = 0;
 	int ch = s[0];
 	*out = 0;
 	if (!ch)
 		return -1;
 	size_t j = 0;
 	for (j = 0; j < max && (ch = s[j]); j++) {
-		const int digit = convert(ch);
+		const int digit = httpc_character_to_number(ch);
 		if (digit < 0)
 			return -1;
-		const length_t n = (length_t)digit + (result * (length_t)base);
-		if (n < result)
+		const httpc_length_t n = (httpc_length_t)digit + (result * (httpc_length_t)base);
+		if (n < result) /* overflow */
 			return -1;
 		result = n;
 	}
@@ -388,12 +418,12 @@ static int str_to_num(const char *s, length_t *out, const size_t max, unsigned l
 	return 0;
 }
 
-static int scan_number(const char *s, length_t *out, unsigned long base) {
+static int httpc_scan_number(const char *s, httpc_length_t *out, unsigned long base) {
 	assert(s);
 	assert(out);
-	while (isspace(*s))
+	while (C_isspace(*s))
 		s++;
-	return str_to_num(s, out, 64, base);
+	return httpc_string_to_number(s, out, 64, base);
 }
 
 /* URL Format is (roughly):
@@ -408,7 +438,10 @@ static int scan_number(const char *s, length_t *out, unsigned long base) {
  * as spaces.
  *
  * The 'url' string is modified by putting in NUL terminating
- * characters where the separators were.  */
+ * characters where the separators were.  
+ *
+ * With a few modifications (such as accepting a struct for the various fields)
+ * this could be added to the API. */
 static int httpc_parse_url(httpc_t *h, const char *url) {
 	assert(h);
 	assert(url);
@@ -416,7 +449,7 @@ static int httpc_parse_url(httpc_t *h, const char *url) {
 		return HTTPC_ERROR;
 	h->url = NULL;
 	const size_t l = strlen(url);
-	if (buffer(h, &h->burl, l + 2) < 0)
+	if (httpc_buffer(h, &h->burl, l + 2) < 0)
 		return HTTPC_ERROR;
 	h->url = (char*)h->burl.buffer;
 	memcpy(h->url, url, l + 1);
@@ -428,7 +461,7 @@ static int httpc_parse_url(httpc_t *h, const char *url) {
 	char *u = h->url;
 
 	for (;(ch = u[i]); i++)
-		if (!isspace(ch))
+		if (!C_isspace(ch))
 			break;
 	if (!ch) {
 		error(h, "invalid URL: %s", url);
@@ -470,11 +503,11 @@ static int httpc_parse_url(httpc_t *h, const char *url) {
 		goto fail;
 	if (ch == ':') {
 		u[j] = '\0';
-		length_t port = 0;
+		httpc_length_t port = 0;
 		for (i = j + 1; (ch = u[i]); i++)
-			if (!isdigit(ch))
+			if (!C_isdigit(ch))
 				break;
-		if (str_to_num(&u[j + 1], &port, i - (j + 1), 10) < 0) {
+		if (httpc_string_to_number(&u[j + 1], &port, i - (j + 1), 10) < 0) {
 			error(h, "invalid port number");
 			goto fail;
 		}
@@ -499,7 +532,7 @@ fail:
 
 enum { HTTPC_GET, HTTPC_HEAD, HTTPC_PUT, HTTPC_POST, HTTPC_DELETE, HTTPC_TRACE, HTTPC_OPTIONS, };
 
-static const char *op_to_str(int op) {
+static const char *httpc_op_to_str(int op) {
 	switch (op) {
 	case HTTPC_GET:     return "GET ";
 	case HTTPC_HEAD:    return "HEAD ";
@@ -512,80 +545,80 @@ static const char *op_to_str(int op) {
 	return NULL;
 }
 
-static int httpc_request_send_header(httpc_t *h, buffer_t *b0, int op) {
+static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 	assert(h);
 	assert(b0);
 	implies(h->os.argc, h->os.argv);
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
-	const char *operation = op_to_str(op);
+	const char *operation = httpc_op_to_str(op);
 	if (!operation)
 		return fatal(h, "unknown operation '%d'", op);
 	b0->used = 0;
-	if (buffer_add_string(h, b0, operation) < 0)
+	if (httpc_buffer_add_string(h, b0, operation) < 0)
 		goto fail;
-	if (buffer_add_string(h, b0, h->path ? h->path : "/") < 0)
+	if (httpc_buffer_add_string(h, b0, h->path ? h->path : "/") < 0)
 		goto fail;
 	if (h->os.flags & HTTPC_OPT_HTTP_1_0) {
-		if (buffer_add_string(h, b0, " HTTP/1.0\r\nHost: ") < 0)
+		if (httpc_buffer_add_string(h, b0, " HTTP/1.0\r\nHost: ") < 0)
 			goto fail;
 	} else {
-		if (buffer_add_string(h, b0, " HTTP/1.1\r\nHost: ") < 0)
+		if (httpc_buffer_add_string(h, b0, " HTTP/1.1\r\nHost: ") < 0)
 			goto fail;
 	}
-	if (buffer_add_string(h, b0, h->domain) < 0)
+	if (httpc_buffer_add_string(h, b0, h->domain) < 0)
 		goto fail;
-	if (buffer_add_string(h, b0, "\r\n") < 0)
+	if (httpc_buffer_add_string(h, b0, "\r\n") < 0)
 		goto fail;
 	if (op == HTTPC_GET && h->os.flags & HTTPC_OPT_HTTP_1_0 && h->position && h->accept_ranges) {
-		char range[64 + 1] = { 0 };
-		if (buffer_add_string(h, b0, "Range: bytes=") < 0)
+		char range[64 + 1] = { 0, };
+		if (httpc_buffer_add_string(h, b0, "Range: bytes=") < 0)
 			goto fail;
-		num_to_str(range, h->position, 10);
-		if (buffer_add_string(h, b0, range) < 0)
+		httpc_num_to_str(range, h->position, 10);
+		if (httpc_buffer_add_string(h, b0, range) < 0)
 			goto fail;
-		if (buffer_add_string(h, b0, "-\r\n") < 0)
+		if (httpc_buffer_add_string(h, b0, "-\r\n") < 0)
 			goto fail;
 	}
 	if (op == HTTPC_PUT || op == HTTPC_POST) {
 		if (h->length_set) {
-			char content[64 + 1] = { 0 };
-			if (buffer_add_string(h, b0, "Content-Length: ") < 0)
+			char content[64 + 1] = { 0, };
+			if (httpc_buffer_add_string(h, b0, "Content-Length: ") < 0)
 				goto fail;
-			num_to_str(content, h->length, 10);
-			if (buffer_add_string(h, b0, content) < 0)
+			httpc_num_to_str(content, h->length, 10);
+			if (httpc_buffer_add_string(h, b0, content) < 0)
 				goto fail;
-			if (buffer_add_string(h, b0, "\r\n") < 0)
+			if (httpc_buffer_add_string(h, b0, "\r\n") < 0)
 				goto fail;
 		} else { /* Attempt to send chunked encoding */
-			if (buffer_add_string(h, b0, "Transfer-Encoding: chunked\r\n") < 0)
+			if (httpc_buffer_add_string(h, b0, "Transfer-Encoding: chunked\r\n") < 0)
 				goto fail;
 		}
 	}
 
 	if (httpc_is_reuse(h)) {
-		if (buffer_add_string(h, b0, "Connection: keep-alive\r\n") < 0)
+		if (httpc_buffer_add_string(h, b0, "Connection: keep-alive\r\n") < 0)
 			goto fail;
 	} else {
-		if (buffer_add_string(h, b0, "Connection: close\r\n") < 0)
+		if (httpc_buffer_add_string(h, b0, "Connection: close\r\n") < 0)
 			goto fail;
 	}
-	if (buffer_add_string(h, b0, "Accept-Encoding: identity\r\n") < 0)
+	if (httpc_buffer_add_string(h, b0, "Accept-Encoding: identity\r\n") < 0)
 		goto fail;
 	if (h->userpass) {
 		const size_t upl = strlen(h->userpass);
-		if (buffer_add_string(h, b0, "Authorization: Basic ") < 0)
+		if (httpc_buffer_add_string(h, b0, "Authorization: Basic ") < 0)
 			goto fail;
-		if (buffer_add_base64(h, b0, (uint8_t*)h->userpass, upl) < 0) {
+		if (httpc_buffer_add_base64(h, b0, (uint8_t*)h->userpass, upl) < 0) {
 			error(h, "base64 encoding fail");
 			goto fail;
 		}
-		if (buffer_add_string(h, b0, "\r\n") < 0)
+		if (httpc_buffer_add_string(h, b0, "\r\n") < 0)
 			goto fail;
 	}
 
 	/* NB. We could split up the writes by instead calling 'httpc_network_write' instead 
-	 * of 'buffer_add_string' if we wanted. It has some advantages. */
+	 * of 'httpc_buffer_add_string' if we wanted. It has some advantages. */
 	assert(b0->used > 0u);
 	if (httpc_network_write(h, b0->buffer, b0->used - 1u) < 0)
 		goto fail;
@@ -612,7 +645,7 @@ fail:
 }
 
 static int httpc_backoff(httpc_t *h) {
-	/* NB. Instead of Xms, we could use the round trip time as estimated by the
+	/* N.B. Instead of Xms, we could use the round trip time as estimated by the
 	 * connection time as an initial guess as per RFC 2616 */
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
@@ -635,9 +668,10 @@ static int httpc_backoff(httpc_t *h) {
 static inline int httpc_case_insensitive_compare(const char *a, const char *b, const size_t length) {
 	assert(a);
 	assert(b);
+	assert(length < SIZE_MAX);
 	for (size_t i = 0; i < length ; i++) {
-		const int ach = tolower(a[i]);
-		const int bch = tolower(b[i]);
+		const int ach = C_tolower(a[i]);
+		const int bch = C_tolower(b[i]);
 		const int diff = ach - bch;
 		if (!ach || diff)
 			return diff;
@@ -733,7 +767,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			}
 			return error(h, "unknown connection type");
 		case FLD_CONTENT_LENGTH:
-			if (scan_number(&line[fld->length], &h->length, 10) < 0)
+			if (httpc_scan_number(&line[fld->length], &h->length, 10) < 0)
 				return error(h, "invalid content length: %s", line);
 			h->length_set = 1;
 			return info(h, "Content Length: %lu", (unsigned long)h->length);
@@ -742,10 +776,10 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 				if (h->redirects++ > h->redirects_max)
 					return error(h, "redirect count exceed max (%u)", (unsigned)h->redirects_max);
 				size_t k = 0, j = 0;
-				for (k = fld->length; isspace(line[k]); k++)
+				for (k = fld->length; C_isspace(line[k]); k++)
 					;
 				j = k;
-				for (k = fld->length; !isspace(line[k]) && line[k]; k++)
+				for (k = fld->length; !C_isspace(line[k]) && line[k]; k++)
 					;
 				line[k] = '\0';
 				if (httpc_parse_url(h, &line[j]) < 0)
@@ -761,7 +795,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 	return info(h, "unknown field: %s", line);
 }
 
-static int httpc_read_until_line_end(httpc_t *h, buffer_t *b, size_t *length) {
+static int httpc_read_until_line_end(httpc_t *h, httpc_buffer_t *b, size_t *length) {
 	assert(h);
 	assert(b);
 	assert(length);
@@ -775,22 +809,25 @@ static int httpc_read_until_line_end(httpc_t *h, buffer_t *b, size_t *length) {
 	for (size_t i = 0; i < (olength - 1ul); i++) {
 		const int ch = httpc_read_char(h);
 		if (ch < 0) {
+			assert(i < olength);
 			b->buffer[i] = '\0';
 			return error(h, "unexpected EOF");
 		}
 		if (ch == '\n' || ch == '\r') { /* accept either "\n" or "\r\n" */
 			if (ch != '\n' && httpc_read_char(h) != '\n')
 				return error(h, "Got '\\r' with no '\\n'");
+			assert(i < olength);
 			b->buffer[i] = '\0';
 			*length = i;
 			return HTTPC_OK;
 		}
+		assert(i < olength);
 		b->buffer[i] = ch;
 		if ((i + 1ul) >= (olength - 1ul)) {
 			const size_t newsz = olength * 2ul;
-			if (newsz < olength)
+			if (newsz < olength) /* overflow */
 				return HTTPC_ERROR;
-			if (buffer(h, b, newsz) < 0)
+			if (httpc_buffer(h, b, newsz) < 0)
 				return HTTPC_ERROR;
 			olength = newsz;
 		}
@@ -818,16 +855,16 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	} else {
 		return error(h, "unknown HTTP protocol/version: %s", line);
 	}
-	while (isspace(line[i]))
+	while (C_isspace(line[i]))
 		i++;
 	j = i;
-	while (isdigit(line[j]))
+	while (C_isdigit(line[j]))
 		j++;
-	length_t resp = 0;
-	if (str_to_num((const char *)&line[i], &resp, j - i, 10) < 0)
+	httpc_length_t resp = 0;
+	if (httpc_string_to_number((const char *)&line[i], &resp, j - i, 10) < 0)
 		return error(h, "invalid response number: %s", line);
 	h->response = resp;
-	while (isspace(line[j]))
+	while (C_isspace(line[j]))
 		j++;
 	if(j >= length)
 		return error(h, "bounds exceeded");
@@ -843,7 +880,7 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	return HTTPC_OK;
 }
 
-static int httpc_parse_response_header(httpc_t *h, buffer_t *b0) {
+static int httpc_parse_response_header(httpc_t *h, httpc_buffer_t *b0) {
 	assert(h);
 	assert(b0);
 	if (httpc_is_dead(h))
@@ -899,7 +936,7 @@ static int httpc_execute_rcv_callback(httpc_t *h, const unsigned char *buf, cons
 	return HTTPC_OK;
 }
 
-static int httpc_parse_response_body_identity(httpc_t *h, buffer_t *b0) {
+static int httpc_parse_response_body_identity(httpc_t *h, httpc_buffer_t *b0) {
 	assert(h);
 	assert(h->identity);
 	assert(b0);
@@ -929,7 +966,7 @@ static int httpc_parse_response_body_identity(httpc_t *h, buffer_t *b0) {
 	return HTTPC_OK;
 }
 
-static int httpc_parse_response_body_chunked(httpc_t *h, buffer_t *b0) {
+static int httpc_parse_response_body_chunked(httpc_t *h, httpc_buffer_t *b0) {
 	assert(h);
 	assert(b0);
 	assert(h->identity == 0);
@@ -943,8 +980,8 @@ static int httpc_parse_response_body_chunked(httpc_t *h, buffer_t *b0) {
 				return info(h, "zero content length, nothing to read");
 			return error(h, "unexpected EOF");
 		}
-		length_t length = 0;
-		if (str_to_num((char*)b0->buffer, &length, nl, 16) < 0)
+		httpc_length_t length = 0;
+		if (httpc_string_to_number((char*)b0->buffer, &length, nl, 16) < 0)
 			return error(h, "number format error: %s", b0->buffer);
 		if (length == 0)
 			return info(h, "chunked done");
@@ -987,7 +1024,7 @@ static int httpc_parse_response_body(httpc_t *h) {
 	return httpc_parse_response_body_chunked(h, &h->b0);
 }
 
-static int httpc_generate_request_body(httpc_t *h, buffer_t *b0) {
+static int httpc_generate_request_body(httpc_t *h, httpc_buffer_t *b0) {
 	assert(h);
 	assert(b0);
 	int r = HTTPC_OK;
@@ -1015,7 +1052,7 @@ static int httpc_generate_request_body(httpc_t *h, buffer_t *b0) {
 		if (chunky) {
 			char n[64 + 1] = { 0, };
 			assert(r < INT_MAX);
-			const unsigned l = num_to_str(n, r, 16);
+			const unsigned l = httpc_num_to_str(n, r, 16);
 			assert((l + 2) <= sizeof (n));
 			memcpy(&n[l], "\r\n", 3);
 			if (httpc_network_write(h, (unsigned char*)n, l + 2) < 0) {
@@ -1047,25 +1084,25 @@ static int httpc_generate_request_body(httpc_t *h, buffer_t *b0) {
 	return info(h, "body generated");
 }
 
-static inline int banner(httpc_t *h) {
+static inline int httpc_banner(httpc_t *h) {
 	assert(h);
 	USED(h);
 	USED(httpc_log_line); /* warning suppression if HTTPC_LOGGING == 0 */
-	info(h, "Program: "PROGRAM);
-	info(h, "Version: "VERSION);
-	info(h, "Repo:    "REPO);
-	info(h, "Author:  "AUTHOR);
-	info(h, "Email:   "EMAIL);
+	info(h, "Program: "HTTPC_PROGRAM);
+	info(h, "Version: "HTTPC_VERSION);
+	info(h, "Repo:    "HTTPC_REPO);
+	info(h, "Author:  "HTTPC_AUTHOR);
+	info(h, "Email:   "HTTPC_EMAIL);
 	info(h, "Options: stk=%lu tst=%u grw=%u log=%u cons=%u redirs=%u hmax=%lu sz=%u",
 		HTTPC_STACK_BUFFER_SIZE, HTTPC_TESTS_ON, HTTPC_GROW,
 		HTTPC_LOGGING, HTTPC_CONNECTION_ATTEMPTS, HTTPC_REDIRECT_MAX,
 		HTTPC_MAX_HEADER, (unsigned)(sizeof *h));
-	return info(h, "License: "LICENSE);
+	return info(h, "License: "HTTPC_LICENSE);
 }
 
 enum { SM_INIT, SM_OPEN, SM_SNDH, SM_SNDB, SM_RCVH, SM_RCVB, SM_REDR, SM_BCKO, SM_SLEP, SM_DONE, };
 
-static inline const char *sm_to_str(int sm) {
+static inline const char *sm_to_str(const int sm) {
 	switch (sm) {
 	case SM_INIT: return "initial  ";
 	case SM_OPEN: return "open     ";
@@ -1101,12 +1138,12 @@ next_state:
 			h->status = fatal(h, "unable to get time");
 			next      = SM_DONE;
 		}
-		if (banner(h) < 0) {
+		if (httpc_banner(h) < 0) {
 			h->status = HTTPC_ERROR;
 			next      = SM_DONE;
 		}
-		if (buffer(h, &h->b0,   HTTPC_STACK_BUFFER_SIZE) < 0) { h->status = HTTPC_ERROR; next = SM_DONE; break; }
-		if (buffer(h, &h->burl, strlen(url) + 1) < 0)         { h->status = HTTPC_ERROR; next = SM_DONE; break; }
+		if (httpc_buffer(h, &h->b0,   HTTPC_STACK_BUFFER_SIZE) < 0) { h->status = HTTPC_ERROR; next = SM_DONE; break; }
+		if (httpc_buffer(h, &h->burl, strlen(url) + 1) < 0)         { h->status = HTTPC_ERROR; next = SM_DONE; break; }
 		if (httpc_parse_url(h, url) < 0)                      { h->status = HTTPC_ERROR; next = SM_DONE; break; }
 		if (h->retries_max == 0)
 			h->retries_max = HTTPC_CONNECTION_ATTEMPTS;
@@ -1171,7 +1208,7 @@ next_state:
 	case SM_RCVB:
 		next = SM_DONE;
 		if (op == HTTPC_GET) {
-			const length_t pos = h->position;
+			const httpc_length_t pos = h->position;
 			h->progress = 0;
 			const int r = httpc_parse_response_body(h);
 			if (r < 0) {
@@ -1376,7 +1413,7 @@ int httpc_options(httpc_options_t *a, const char *url) {
 static int httpc_get_buffer_cb(void *param, unsigned char *buf, size_t length, size_t position) {
 	assert(param);
 	assert(buf);
-	buffer_cb_t *b = param;
+	httpc_buffer_cb_t *b = param;
 	if ((length + position) > b->length || (length + position) < length)
 		return HTTPC_ERROR;
 	memcpy(&b->buffer[position], buf, length);
@@ -1388,7 +1425,7 @@ static int httpc_get_buffer_cb(void *param, unsigned char *buf, size_t length, s
 static int httpc_put_buffer_cb(void *param, unsigned char *buf, size_t length, size_t position) {
 	assert(param);
 	assert(buf);
-	buffer_cb_t *b = param;
+	httpc_buffer_cb_t *b = param;
 	assert(b->used <= b->length);
 	if (position > b->used)
 		return HTTPC_ERROR;
@@ -1411,7 +1448,7 @@ int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *
 	assert(length);
 	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
-	buffer_cb_t param = { .buffer = buffer, .length = *length, };
+	httpc_buffer_cb_t param = { .buffer = buffer, .length = *length, };
 	*length  = 0;
 	const int r = httpc_op_stack(a, url, HTTPC_GET, httpc_get_buffer_cb, &param, NULL, NULL);
 	if (r == HTTPC_OK)
@@ -1425,7 +1462,7 @@ int httpc_put_buffer(httpc_options_t *a, const char *url, char *buffer, size_t l
 	assert(buffer);
 	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
-	buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
+	httpc_buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
 	return httpc_op_stack(a, url, HTTPC_PUT, NULL, NULL, httpc_put_buffer_cb, &param);
 }
 
@@ -1435,7 +1472,7 @@ int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t 
 	assert(buffer);
 	if (httpc_buffer_unsupported(a))
 		return HTTPC_ERROR;
-	buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
+	httpc_buffer_cb_t param = { .buffer = buffer, .length = length, .used = length, };
 	return httpc_op_stack(a, url, HTTPC_POST, NULL, NULL, httpc_put_buffer_cb, &param);
 }
 
@@ -1541,7 +1578,7 @@ static inline int httpc_testing_write(void *socket, const unsigned char *buf, si
 	assert(socket);
 	assert(buf);
 	assert(length);
-	return HTTPC_OK; /* discard for now */
+	return HTTPC_OK; /* discard for now; better unit tests would compare what is written as well */
 }
 
 int httpc_tests(httpc_options_t *a) {
@@ -1555,6 +1592,9 @@ int httpc_tests(httpc_options_t *a) {
 
 	if (HTTPC_TESTS_ON == 0)
 		return HTTPC_OK;
+
+	/*if (localely_unit_tests() < 0)
+		r = HTTPC_ERROR;*/
 
 	a->open  = httpc_testing_open;
 	a->close = httpc_testing_close;

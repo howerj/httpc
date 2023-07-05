@@ -204,6 +204,9 @@ Known limitations include:
   a description of the problem and a possible solution in C.
 * The library should be fuzzed, and has not been. Preferably with something
   like [AFL](https://lcamtuf.coredump.cx/afl/).
+* The library would be better expressed as a 
+  [header only library](https://en.wikipedia.org/wiki/Header-only) as that
+  is what all of the cool kids are using.
 * The library is quite thirsty for stack size for a library meant to be run on
   an embedded microcontroller. It will require at least 1KiB of stack, and
   possibly more depending on how your callbacks are written.
@@ -215,7 +218,7 @@ Known limitations include:
   may not suite you.
 * The set of functions provided by this library should suite the common cases,
   however somethings are not supported, for example a GET request can have a
-  body, but there is no way to handle this.
+  body.
 * Entropy cannot be reversed, meaning all acts of man no matter how great will
   eventually be rendered futile, the best one can hope for is eternal return,
   are you proud of what you have achieved? Or will you die like a dog in the
@@ -229,8 +232,8 @@ For any bugs please contact the author at <mailto:howe.r.j.89@gmail.com>.
 Please include as much information as possible including, but not limited to:
 information on what platform you are compiling your code on (OS, 32/64-bit,
 ...), tracing information (for example, valgrind output), a minimal test
-case, thoughts, comments and general rants. Alternatively shout into a buck or
-pray to your gods.
+case, a (small) blood sacrifice, three bushels of wheat, thoughts, comments 
+and general rants. Alternatively shout into a buck or pray to your gods.
 
 [WebSockets]: https://en.wikipedia.org/wiki/WebSocket
 [linux]: https://www.linux.org/

@@ -78,7 +78,7 @@ HTTPC_API int httpc_end_session(httpc_options_t *a);
 HTTPC_API int httpc_tests(httpc_options_t *a);
 
 /* You provide these functions and populate 'httpc_options_t' with them when porting to a new platform 
- * (ie. Not Unix or Windows) - return negative on failure, zero (HTTPC_OK) on success, and for 
+ * (i.e. Not Unix or Windows) - return negative on failure, zero (HTTPC_OK) on success, and for 
  * open/close/read/write return HTTPC_YIELD if you want the client to yield to its' caller. */
 HTTPC_API extern int httpc_open(void **socket, httpc_options_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
 HTTPC_API extern int httpc_close(void *socket, httpc_options_t *a);

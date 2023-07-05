@@ -1,6 +1,6 @@
-HTTPC_VERSION=3.1.4
+HTTPC_VERSION=3.1.5
 STD=c99
-CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DVERSION="\"${HTTPC_VERSION}\""
+CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="\"${HTTPC_VERSION}\""
 TARGET=httpc
 AR      = ar
 ARFLAGS = rcs
@@ -34,14 +34,14 @@ all: ${TARGET}
 test: ${TARGET}
 	./${TARGET} -t
 
-main.o: main.c ${TARGET}.h
+main.o: main.c ${TARGET}.h makefile
 
-${TARGET}.o: ${TARGET}.c ${TARGET}.h
+${TARGET}.o: ${TARGET}.c ${TARGET}.h localely.h makefile
 
-win.o:  win.c ${TARGET}.h
+win.o:  win.c ${TARGET}.h makefile
 
 unix.o: STD=gnu99
-unix.o: unix.c ${TARGET}.h
+unix.o: unix.c ${TARGET}.h makefile
 
 lib${TARGET}.a: ${TARGET}.o ${PLATFORM}.o ${TARGET}.h
 	${AR} ${ARFLAGS} $@ ${TARGET}.o ${PLATFORM}.o

@@ -1,3 +1,27 @@
+/* The Unix callbacks.
+ *
+ * I hate TLS/SSL, it is far to complex, the interfaces suck, and
+ * it is a pain to use in an embedded system (it requires a million
+ * different algorithms (is the ChaBlowCurveAES-256 algorithm more secure 
+ * than FishARC4ElipticRSA-128? No one cares you weeny, just pick one) 
+ * if you want to be compatible with any system and requires a ludicrous 
+ * amount of memory per connection (~16-32KiB)), has too many optional 
+ * options and options, and several different encoding and file 
+ * formats for the certificates (just pick one!).
+ *
+ * I hope something simpler replaces it. I swear that the makers of
+ * cryptographic software deliberately make it difficult to use and
+ * integrate so as to weaken the security of everything, a conspiracy
+ * by the C.I.A would make perfect sense as to why it is so shit, hell,
+ * at least that would make sense!
+ *
+ * Luckily I do not have to care that much about it and can just
+ * wrap everything up and link to a giant blob of fail, cordoning
+ * everything off in here. 
+ *
+ * Mind you the socket interface in Unix kind of sucks as well. At
+ * least that has the excuse of not being made by the original makers
+ * of Unix. */
 #include "httpc.h"
 #include <arpa/inet.h>
 #include <assert.h>
@@ -87,7 +111,6 @@ static int ssl_open(socket_t *s, httpc_options_t *a, const char *domain) {
 	SSL_set_fd(s->ssl, s->fd);
 	if (SSL_set_tlsext_host_name(s->ssl, domain) != 1)
 		goto fail;
-
 
 	if (SSL_connect(s->ssl) != 1)
 		goto fail;
