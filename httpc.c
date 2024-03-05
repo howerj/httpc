@@ -1148,7 +1148,7 @@ next_state:
 		if (h->retries_max == 0)
 			h->retries_max = HTTPC_CONNECTION_ATTEMPTS;
 		if (h->redirects_max == 0)
-			h->retries_max = HTTPC_REDIRECT_MAX;
+			h->redirects_max = HTTPC_REDIRECT_MAX;
 		break;
 	case SM_OPEN: {
 		next = SM_SNDH;
