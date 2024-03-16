@@ -49,6 +49,8 @@ struct httpc_options {
 
 	int argc;         /* custom headers count; number of custom headers */
 	char **argv;      /* custom headers; appended to the HTTP request */
+
+	void *context;    /* For your use, feel free to fill with good thoughts and positive affirmations */
 };
 
 typedef struct httpc_options httpc_options_t;

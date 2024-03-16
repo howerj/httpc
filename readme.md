@@ -196,7 +196,7 @@ Known limitations include:
   buffer size (of 128, which can be changed) will place limitations of URL
   length and line length (each field in the HTTP header is a single line).
 * File sizes are probably limited up to 2GiB on many platforms.
-* The library has a non-blocking version, however what this really means is
+* The library has a non-blocking mechanism, however what this really means is
   'less-blocky' and may block until a time out on a socket. This is likely to
   improve and yield more often as time goes on. However turning this library
   into a fully non-blocking version is a non-trivial task. See
@@ -213,6 +213,7 @@ Known limitations include:
 * The client is more liberal in what it will accept from the server than it
   should be, allowing newlines to be terminated by a single CR with no LF, and
   comparisons are done in a case-insensitive manner.
+* A C++ wrapper, and wrappers for other language, would not go amiss.
 * The socket and SSL settings are provided by a series of callbacks - this
   allows you to set things like timeouts and keep-alive settings, the defaults
   may not suite you.
