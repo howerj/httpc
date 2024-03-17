@@ -213,6 +213,8 @@ Known limitations include:
 * The client is more liberal in what it will accept from the server than it
   should be, allowing newlines to be terminated by a single CR with no LF, and
   comparisons are done in a case-insensitive manner.
+* HTTP Status Code 206 (partial content) is not handled, which could be fairly
+  easily.
 * A C++ wrapper, and wrappers for other language, would not go amiss.
 * The socket and SSL settings are provided by a series of callbacks - this
   allows you to set things like timeouts and keep-alive settings, the defaults

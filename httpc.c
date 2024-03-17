@@ -162,7 +162,7 @@ static int httpc_log_fmt(httpc_t *h, const char *fmt, ...) {
 	assert(h->os.logger);
 	va_list ap;
 	va_start(ap, fmt);
-	const int r = h->os.logger(h->os.logfile, fmt, ap);
+	const int r = h->os.logger(&h->os, h->os.logfile, fmt, ap);
 	va_end(ap);
 	if (r < 0)
 		(void)httpc_kill(h);
@@ -179,7 +179,7 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 			return HTTPC_ERROR;
 		va_list ap;
 		va_start(ap, fmt);
-		if (h->os.logger(h->os.logfile, fmt, ap) < 0)
+		if (h->os.logger(&h->os, h->os.logfile, fmt, ap) < 0)
 			(void)httpc_kill(h);
 		va_end(ap);
 		if (httpc_log_fmt(h, "\n") < 0)
@@ -243,7 +243,7 @@ static int httpc_network_read(httpc_t *h, unsigned char *bytes, size_t *length) 
 	assert(h);
 	assert(bytes);
 	assert(length);
-	const int r = h->os.read(h->socket, bytes, length);
+	const int r = h->os.read(&h->os, h->socket, bytes, length);
 	if (r < 0 || (r != HTTPC_OK && r != HTTPC_YIELD))
 		return error(h, "network read error %d", r);
 	if (r == HTTPC_YIELD)
@@ -257,7 +257,7 @@ static int httpc_network_write(httpc_t *h, const unsigned char *bytes, size_t le
 	if (length == 0)
 		return HTTPC_OK;
 	size_t l = length;
-	const int r = h->os.write(h->socket, bytes, &l);
+	const int r = h->os.write(&h->os, h->socket, bytes, &l);
 	if (l != length)
 		return error(h, "network write incomplete");
 	if (r < 0 || (r != HTTPC_OK && r != HTTPC_YIELD))
@@ -654,14 +654,14 @@ static int httpc_backoff(httpc_t *h) {
 	const unsigned long limited = MIN(1000ul * 10ul * 1ul, backoff);
 	if (httpc_is_yield_on(h)) {
 		unsigned long now_ms = 0;
-		if (h->os.time(&now_ms) < 0)
+		if (h->os.time(&h->os, &now_ms) < 0)
 			return fatal(h, "unable to get time");
 		if ((now_ms - h->current_ms) > limited)
 			return HTTPC_OK;
 		return HTTPC_YIELD;
 	}
 	info(h, "backing off for %lu ms, retried %u", limited, (h->retries));
-	return h->os.sleep(limited);
+	return h->os.sleep(&h->os, limited);
 }
 
 /* This allows us to be a bit more liberal in what we accept */
@@ -1134,7 +1134,7 @@ next_state:
 			h->status = fatal(h, "unknown option provided %u", h->os.flags);
 			next      = SM_DONE;
 		}
-		if (h->os.time(&h->start_ms) < 0) {
+		if (h->os.time(&h->os, &h->start_ms) < 0) {
 			h->status = fatal(h, "unable to get time");
 			next      = SM_DONE;
 		}
@@ -1156,7 +1156,7 @@ next_state:
 		implies(h->open, h->keep_alive);
 		if (h->open) /* reuse connection */
 			break;
-		const int y = h->os.open(&h->socket, &h->os, h->os.socketopts, h->domain, h->port, h->use_ssl);
+		const int y = h->os.open(&h->os, &h->socket, h->os.socketopts, h->domain, h->port, h->use_ssl);
 		if (y == HTTPC_OK)
 			h->open = 1;
 		else if (y == HTTPC_YIELD)
@@ -1221,7 +1221,7 @@ next_state:
 		break;
 	case SM_REDR:
 		next = SM_OPEN;
-		if (h->os.close(h->socket, &h->os) == HTTPC_YIELD) {
+		if (h->os.close(&h->os, h->socket) == HTTPC_YIELD) {
 			next = SM_REDR;
 		} else { /* do not care about errors -- only yield */
 			h->open = 0;
@@ -1231,7 +1231,7 @@ next_state:
 	case SM_BCKO:
 		next = SM_SLEP;
 		if (h->open) {
-			if (h->os.close(h->socket, &h->os) == HTTPC_YIELD) {
+			if (h->os.close(&h->os, h->socket) == HTTPC_YIELD) {
 				next = SM_BCKO;
 				break; /* !! */
 			} else { /* do not care about errors -- only yield */
@@ -1248,7 +1248,7 @@ next_state:
 		h->progress = 0;
 		h->redirect = 0;
 
-		if (h->os.time(&h->current_ms) < 0) {
+		if (h->os.time(&h->os, &h->current_ms) < 0) {
 			h->status = fatal(h, "unable to get time");
 			next = SM_DONE;
 		}
@@ -1273,7 +1273,7 @@ next_state:
 				h->state = next; /* !! */
 				return HTTPC_REUSE; /* !! */
 			}
-			if (h->os.close(h->socket, &h->os) == HTTPC_YIELD) {
+			if (h->os.close(&h->os, h->socket) == HTTPC_YIELD) {
 				/* stay in the same state */
 				break; /* !! */
 			} else { /* do not care about errors -- only yield */
@@ -1286,7 +1286,7 @@ next_state:
 			h->status = HTTPC_ERROR;
 		if (buffer_free(h, &h->burl) < 0)
 			h->status = HTTPC_ERROR;
-		if (h->os.time(&h->end_ms) < 0)
+		if (h->os.time(&h->os, &h->end_ms) < 0)
 			h->status = HTTPC_ERROR;
 		debug(h, "took %lu ms", h->end_ms - h->start_ms);
 		const int dead = httpc_is_dead(h);
@@ -1476,12 +1476,14 @@ int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t 
 	return httpc_op_stack(a, url, HTTPC_POST, NULL, NULL, httpc_put_buffer_cb, &param);
 }
 
-static inline int httpc_testing_sleep(unsigned long milliseconds) {
+static inline int httpc_testing_sleep(httpc_options_t *os, unsigned long milliseconds) {
+	assert(os);
 	UNUSED(milliseconds);
 	return HTTPC_OK;
 }
 
-static inline int httpc_testing_time(unsigned long *milliseconds) {
+static inline int httpc_testing_time(httpc_options_t *os, unsigned long *milliseconds) {
+	assert(os);
 	assert(milliseconds);
 	*milliseconds = 1;
 	return HTTPC_OK;
@@ -1493,7 +1495,7 @@ typedef struct {
 	size_t length, position;
 } testing_t;
 
-static inline int httpc_testing_open(void **socket, httpc_options_t *a, void *opts, const char *domain, unsigned short port, int use_ssl) {
+static inline int httpc_testing_open(httpc_options_t *a, void **socket, void *opts, const char *domain, unsigned short port, int use_ssl) {
 	assert(socket);
 	assert(a);
 	assert(opts);
@@ -1551,14 +1553,15 @@ static inline int httpc_testing_open(void **socket, httpc_options_t *a, void *op
 	return HTTPC_ERROR;
 }
 
-static inline int httpc_testing_close(void *socket, httpc_options_t *a) {
+static inline int httpc_testing_close(httpc_options_t *a, void *socket) {
 	assert(a);
 	assert(socket);
 	testing_t *t = socket;
 	return httpc_free(t->h, t);
 }
 
-static inline int httpc_testing_read(void *socket, unsigned char *buf, size_t *length) {
+static inline int httpc_testing_read(httpc_options_t *os, void *socket, unsigned char *buf, size_t *length) {
+	assert(os);
 	assert(socket);
 	assert(buf);
 	assert(length);
@@ -1574,7 +1577,8 @@ static inline int httpc_testing_read(void *socket, unsigned char *buf, size_t *l
 	return HTTPC_OK;
 }
 
-static inline int httpc_testing_write(void *socket, const unsigned char *buf, size_t *length) {
+static inline int httpc_testing_write(httpc_options_t *os, void *socket, const unsigned char *buf, size_t *length) {
+	assert(os);
 	assert(socket);
 	assert(buf);
 	assert(length);
