@@ -29,16 +29,19 @@ enum {
 
 typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, size_t position);
 
+struct httpc_options;
+typedef struct httpc_options httpc_options_t;
+
 struct httpc_options {
 	allocator_fn allocator;
 
-	int (*open)(void **socket, struct httpc_options *os, void *opts, const char *domain, unsigned short port, int use_ssl);
-	int (*close)(void *socket, struct httpc_options *os);
-	int (*read)(void *socket, unsigned char *buf, size_t *length);
-	int (*write)(void *socket, const unsigned char *buf, size_t *length);
-	int (*sleep)(unsigned long milliseconds);
-	int (*time)(unsigned long *milliseconds);
-	int (*logger)(void *file, const char *fmt, va_list ap);
+	int (*open)(httpc_options_t *os, void **socket, void *opts, const char *domain, unsigned short port, int use_ssl);
+	int (*close)(httpc_options_t *os, void *socket);
+	int (*read)(httpc_options_t *os, void *socket, unsigned char *buf, size_t *length);
+	int (*write)(httpc_options_t *os, void *socket, const unsigned char *buf, size_t *length);
+	int (*sleep)(httpc_options_t *os, unsigned long milliseconds );
+	int (*time)(httpc_options_t *os, unsigned long *millisecond);
+	int (*logger)(httpc_options_t *os, void *file, const char *fmt, va_list ap);
 
 	void *arena       /* passed to allocator */,
 	     *logfile,    /* passed to logger */
@@ -53,7 +56,6 @@ struct httpc_options {
 	void *context;    /* For your use, feel free to fill with good thoughts and positive affirmations */
 };
 
-typedef struct httpc_options httpc_options_t;
 
 enum {
 	HTTPC_ERROR = -1, /* negated HTTP error codes also returned */
@@ -82,13 +84,13 @@ HTTPC_API int httpc_tests(httpc_options_t *a);
 /* You provide these functions and populate 'httpc_options_t' with them when porting to a new platform 
  * (i.e. Not Unix or Windows) - return negative on failure, zero (HTTPC_OK) on success, and for 
  * open/close/read/write return HTTPC_YIELD if you want the client to yield to its' caller. */
-HTTPC_API extern int httpc_open(void **socket, httpc_options_t *a, void *socketopts, const char *domain, unsigned short port, int use_ssl);
-HTTPC_API extern int httpc_close(void *socket, httpc_options_t *a);
-HTTPC_API extern int httpc_read(void *socket, unsigned char *buf, size_t *length);
-HTTPC_API extern int httpc_write(void *socket, const unsigned char *buf, size_t *length);
-HTTPC_API extern int httpc_sleep(unsigned long milliseconds);
-HTTPC_API extern int httpc_time(unsigned long *milliseconds);
-HTTPC_API extern int httpc_logger(void *logfile, const char *fmt, va_list ap);
+HTTPC_API extern int httpc_open(httpc_options_t *a, void **socket, void *socketopts, const char *domain, unsigned short port, int use_ssl);
+HTTPC_API extern int httpc_close(httpc_options_t *a, void *socket);
+HTTPC_API extern int httpc_read(httpc_options_t *a, void *socket, unsigned char *buf, size_t *length);
+HTTPC_API extern int httpc_write(httpc_options_t *a, void *socket, const unsigned char *buf, size_t *length);
+HTTPC_API extern int httpc_sleep(httpc_options_t *a, unsigned long milliseconds);
+HTTPC_API extern int httpc_time(httpc_options_t *a, unsigned long *milliseconds);
+HTTPC_API extern int httpc_logger(httpc_options_t *a, void *logfile, const char *fmt, va_list ap);
 
 #ifdef __cplusplus
 }

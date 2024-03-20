@@ -6,8 +6,8 @@
  * than FishARC4ElipticRSA-128? No one cares you weeny, just pick one) 
  * if you want to be compatible with any system and requires a ludicrous 
  * amount of memory per connection (~16-32KiB)), has too many optional 
- * options and options, and several different encoding and file 
- * formats for the certificates (just pick one!).
+ * options and options which are optional, and several different encoding 
+ * and file formats for the certificates (just pick one!).
  *
  * I hope something simpler replaces it. I swear that the makers of
  * cryptographic software deliberately make it difficult to use and
@@ -165,7 +165,8 @@ static void *get_in_addr(struct sockaddr *sa) {
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-int httpc_logger(void *logger, const char *fmt, va_list ap) {
+int httpc_logger(httpc_options_t *a, void *logger, const char *fmt, va_list ap) {
+	assert(a);
 	assert(fmt);
 	assert(logger);
 	FILE *f = logger;
@@ -176,7 +177,7 @@ int httpc_logger(void *logger, const char *fmt, va_list ap) {
 	return r;
 }
 
-int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
+int httpc_open(httpc_options_t *a, void **sock, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
 	assert(sock);
 	assert(a);
 	assert(host_or_ip);
@@ -258,12 +259,13 @@ fail:
 	return HTTPC_ERROR;
 }
 
-int httpc_close(void *socket, httpc_options_t *a) {
+int httpc_close(httpc_options_t *a, void *socket) {
 	assert(a);
 	return socket_close(socket, a);
 }
 
-int httpc_read(void *socket, unsigned char *buf, size_t *length) {
+int httpc_read(httpc_options_t *a, void *socket, unsigned char *buf, size_t *length) {
+	assert(a);
 	assert(socket);
 	assert(length);
 	assert(buf);
@@ -285,7 +287,8 @@ again:
 	return HTTPC_OK;
 }
 
-int httpc_write(void *socket, const unsigned char *buf, size_t *length) {
+int httpc_write(httpc_options_t *a, void *socket, const unsigned char *buf, size_t *length) {
+	assert(a);
 	assert(socket);
 	assert(buf);
 	assert(length);
@@ -306,11 +309,13 @@ again:
 	return HTTPC_OK;
 }
 
-int httpc_sleep(unsigned long milliseconds) {
+int httpc_sleep(httpc_options_t *a, unsigned long milliseconds) {
+	assert(a);
 	return usleep(milliseconds * 1000ul) < 0 ? HTTPC_ERROR : HTTPC_OK;
 }
 
-int httpc_time(unsigned long *milliseconds) {
+int httpc_time(httpc_options_t *a, unsigned long *milliseconds) {
+	assert(a);
 	assert(milliseconds);
 	*milliseconds = 0;
 	struct timespec t;

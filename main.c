@@ -190,7 +190,7 @@ static int yield1(int (*cb)(httpc_options_t *, const char *, httpc_callback, voi
 		r = cb(a, url, fn, param);
 		if (r == HTTPC_YIELD && a->flags & HTTPC_OPT_LOGGING_ON)
 			(void)fprintf(stderr, "(yield)\n");
-		if (httpc_sleep(100) < 0) 
+		if (httpc_sleep(a, 100) < 0) 
 			r = HTTPC_ERROR;
 	}
 	return httpc_end_session(a) < 0 ? HTTPC_ERROR : r;
@@ -205,7 +205,7 @@ static int yield2(int (*cb)(httpc_options_t *, const char *), httpc_options_t *a
 		r = cb(a, url);
 		if (r == HTTPC_YIELD && a->flags & HTTPC_OPT_LOGGING_ON)
 			(void)fprintf(stderr, "(yield)\n");
-		if (httpc_sleep(100) < 0) 
+		if (httpc_sleep(a, 100) < 0) 
 			r = HTTPC_ERROR;
 	}
 	return httpc_end_session(a) < 0 ? HTTPC_ERROR : r;

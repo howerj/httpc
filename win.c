@@ -95,7 +95,7 @@ fail:
 #endif
 }
 
-/* NB. read/write do not check if we can retry - too lazy atm to do so */
+/* N.B. read/write do not check if we can retry - too lazy atm to do so */
 static int ssl_read(socket_t *s, unsigned char *buf, size_t *length) {
 	assert(s);
 	assert(buf);
@@ -156,7 +156,8 @@ static void *get_in_addr(struct sockaddr *sa) {
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-int httpc_logger(void *logger, const char *fmt, va_list ap) {
+int httpc_logger(httpc_options_t *a, void *logger, const char *fmt, va_list ap) {
+	assert(a);
 	assert(fmt);
 	assert(logger);
 	FILE *f = logger;
@@ -167,7 +168,7 @@ int httpc_logger(void *logger, const char *fmt, va_list ap) {
 	return r;
 }
 
-int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
+int httpc_open(httpc_options_t *a, void **sock, void *opts, const char *host_or_ip, unsigned short port, int use_ssl) {
 	assert(sock);
 	assert(a);
 	assert(host_or_ip);
@@ -238,13 +239,14 @@ int httpc_open(void **sock, httpc_options_t *a, void *opts, const char *host_or_
 	return HTTPC_OK;
 }
 
-int httpc_close(void *socket, httpc_options_t *a) {
+int httpc_close(httpc_options_t *a, void *socket) {
 	assert(a);
 	UNUSED(a);
 	return socket_close(socket, a);
 }
 
-int httpc_read(void *socket, unsigned char *buf, size_t *length) {
+int httpc_read(httpc_options_t *a, void *socket, unsigned char *buf, size_t *length) {
+	assert(a);
 	assert(length);
 	assert(buf);
 	socket_t *s = socket;
@@ -261,7 +263,8 @@ int httpc_read(void *socket, unsigned char *buf, size_t *length) {
 	return HTTPC_OK;
 }
 
-int httpc_write(void *socket, const unsigned char *buf, size_t *length) {
+int httpc_write(httpc_options_t *a, void *socket, const unsigned char *buf, size_t *length) {
+	assert(a);
 	assert(socket);
 	assert(buf);
 	assert(length);
@@ -277,12 +280,14 @@ int httpc_write(void *socket, const unsigned char *buf, size_t *length) {
 	return HTTPC_OK;
 }
 
-int httpc_sleep(unsigned long milliseconds) {
+int httpc_sleep(httpc_options_t *a, unsigned long milliseconds) {
+	assert(a);
 	Sleep(milliseconds);
 	return HTTPC_OK;
 }
 
-int httpc_time(unsigned long *milliseconds) {
+int httpc_time(httpc_options_t *a, unsigned long *milliseconds) {
+	assert(a);
 	assert(milliseconds);
 	*milliseconds = GetTickCount();
 	return HTTPC_OK;
