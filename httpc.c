@@ -874,7 +874,10 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	if (h->response < 200 || h->response > 399)
 		return error(h, "invalid response number: %u", h->response);
 	if (h->response >= 200 && h->response <= 299) {
-		if (ok[0] == '\0' || ok[1] == '\0' || 0 != httpc_case_insensitive_compare(ok, "OK", 2))
+		int is_empty   = ok[0] == '\0' || ok[1] == '\0';
+		int is_ok      = is_empty ? 0 : httpc_case_insensitive_compare(ok, "OK", 2) == 0;
+		int is_partial = is_ok    ? 0 : httpc_case_insensitive_compare(ok, "Partial Content", 15) == 0;
+		if (is_empty || (!is_ok && !is_partial))
 			return error(h, "unexpected HTTP response: %s", ok);
 	}
 	return HTTPC_OK;
