@@ -65,7 +65,7 @@ typedef struct {
 typedef unsigned long httpc_length_t;
 
 struct httpc {
-	httpc_options_t os; /* operating system dependent functions for socket, TLS/SLL and allocation. */
+	httpc_options_t *os; /* operating system dependent functions for socket, TLS/SLL and allocation. */
 	httpc_buffer_t b0, burl; /* buffers for temporary values, heavily reused, be careful! */
 	httpc_callback snd, /* callback for sending payload, called repeatedly to generate output in chunks */
 		       rcv; /* callback for receiving payload, called piecemeal to on chunks of input */
@@ -143,12 +143,12 @@ static int httpc_is_dead(httpc_t *h) {
 
 static int httpc_is_yield_on(httpc_t *h) {
 	assert(h);
-	return !!(h->os.flags & HTTPC_OPT_NON_BLOCKING);
+	return !!(h->os->flags & HTTPC_OPT_NON_BLOCKING);
 }
 
 static int httpc_is_reuse(httpc_t *h) {
 	assert(h);
-	return !!(h->os.flags & HTTPC_OPT_REUSE);
+	return !!(h->os->flags & HTTPC_OPT_REUSE);
 }
 
 #ifdef __GNUC__
@@ -159,10 +159,10 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 static int httpc_log_fmt(httpc_t *h, const char *fmt, ...) {
 	assert(fmt);
 	assert(h);
-	assert(h->os.logger);
+	assert(h->os->logger);
 	va_list ap;
 	va_start(ap, fmt);
-	const int r = h->os.logger(&h->os, h->os.logfile, fmt, ap);
+	const int r = h->os->logger(h->os, h->os->logfile, fmt, ap);
 	va_end(ap);
 	if (r < 0)
 		(void)httpc_kill(h);
@@ -172,14 +172,14 @@ static int httpc_log_fmt(httpc_t *h, const char *fmt, ...) {
 static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const unsigned line, const char *fmt, ...) {
 	assert(h);
 	assert(fmt);
-	if (h->os.flags & HTTPC_OPT_LOGGING_ON) {
-		assert(h->os.logger);
+	if (h->os->flags & HTTPC_OPT_LOGGING_ON) {
+		assert(h->os->logger);
 		assert(type);
 		if (httpc_log_fmt(h, "%s:%u ", type, line) < 0)
 			return HTTPC_ERROR;
 		va_list ap;
 		va_start(ap, fmt);
-		if (h->os.logger(&h->os, h->os.logfile, fmt, ap) < 0)
+		if (h->os->logger(h->os, h->os->logfile, fmt, ap) < 0)
 			(void)httpc_kill(h);
 		va_end(ap);
 		if (httpc_log_fmt(h, "\n") < 0)
@@ -205,10 +205,10 @@ static inline int httpc_rcode(const int c) { return c; } /* suppresses warnings 
 
 static void *httpc_malloc(httpc_t *h, const size_t size) {
 	assert(h);
-	assert(h->os.allocator);
+	assert(h->os->allocator);
 	if (httpc_is_dead(h))
 		return NULL;
-	void *r = h->os.allocator(h->os.arena, NULL, 0, size);
+	void *r = h->os->allocator(h->os->arena, NULL, 0, size);
 	if (!r) {
 		(void)httpc_kill(h);
 		(void)debug(h, "malloc %ld failed", (long)size);
@@ -221,11 +221,11 @@ static void *httpc_malloc(httpc_t *h, const size_t size) {
 
 static void *httpc_realloc(httpc_t *h, void *pointer, const size_t size) {
 	assert(h);
-	assert(h->os.allocator);
+	assert(h->os->allocator);
 	(void)debug(h, "%s %p/%ld", size > 0 ? "realloc" : "free", pointer, (long)size);
 	if (httpc_is_dead(h) && size > 0)
 		return NULL;
-	void *r = h->os.allocator(h->os.arena, pointer, 0, size);
+	void *r = h->os->allocator(h->os->arena, pointer, 0, size);
 	if (r == NULL && size != 0)
 		(void)httpc_kill(h);
 	return r;
@@ -233,9 +233,9 @@ static void *httpc_realloc(httpc_t *h, void *pointer, const size_t size) {
 
 static int httpc_free(httpc_t *h, void *pointer) {
 	assert(h);
-	assert(h->os.allocator);
+	assert(h->os->allocator);
 	(void)debug(h, "free %p", pointer);
-	(void)h->os.allocator(h->os.arena, pointer, 0, 0);
+	(void)h->os->allocator(h->os->arena, pointer, 0, 0);
 	return HTTPC_OK;
 }
 
@@ -243,7 +243,7 @@ static int httpc_network_read(httpc_t *h, unsigned char *bytes, size_t *length) 
 	assert(h);
 	assert(bytes);
 	assert(length);
-	const int r = h->os.read(&h->os, h->socket, bytes, length);
+	const int r = h->os->read(h->os, h->socket, bytes, length);
 	if (r < 0 || (r != HTTPC_OK && r != HTTPC_YIELD))
 		return error(h, "network read error %d", r);
 	if (r == HTTPC_YIELD)
@@ -257,7 +257,7 @@ static int httpc_network_write(httpc_t *h, const unsigned char *bytes, size_t le
 	if (length == 0)
 		return HTTPC_OK;
 	size_t l = length;
-	const int r = h->os.write(&h->os, h->socket, bytes, &l);
+	const int r = h->os->write(h->os, h->socket, bytes, &l);
 	if (l != length)
 		return error(h, "network write incomplete");
 	if (r < 0 || (r != HTTPC_OK && r != HTTPC_YIELD))
@@ -548,7 +548,7 @@ static const char *httpc_op_to_str(int op) {
 static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 	assert(h);
 	assert(b0);
-	implies(h->os.argc, h->os.argv);
+	implies(h->os->argc, h->os->argv);
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
 	const char *operation = httpc_op_to_str(op);
@@ -559,7 +559,7 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 		goto fail;
 	if (httpc_buffer_add_string(h, b0, h->path ? h->path : "/") < 0)
 		goto fail;
-	if (h->os.flags & HTTPC_OPT_HTTP_1_0) {
+	if (h->os->flags & HTTPC_OPT_HTTP_1_0) {
 		if (httpc_buffer_add_string(h, b0, " HTTP/1.0\r\nHost: ") < 0)
 			goto fail;
 	} else {
@@ -570,7 +570,7 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 		goto fail;
 	if (httpc_buffer_add_string(h, b0, "\r\n") < 0)
 		goto fail;
-	if (op == HTTPC_GET && h->os.flags & HTTPC_OPT_HTTP_1_0 && h->position && h->accept_ranges) {
+	if (op == HTTPC_GET && h->os->flags & HTTPC_OPT_HTTP_1_0 && h->position && h->accept_ranges) {
 		char range[64 + 1] = { 0, };
 		if (httpc_buffer_add_string(h, b0, "Range: bytes=") < 0)
 			goto fail;
@@ -623,8 +623,8 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 	if (httpc_network_write(h, b0->buffer, b0->used - 1u) < 0)
 		goto fail;
 
-	for (int i = 0; i < h->os.argc; i++) {
-		const char *line = h->os.argv[i];
+	for (int i = 0; i < h->os->argc; i++) {
+		const char *line = h->os->argv[i];
 		size_t l = 0;
 		for (l = 0; line[l]; l++)
 			if (line[l] == '\r' || line[l] == '\n')
@@ -654,14 +654,14 @@ static int httpc_backoff(httpc_t *h) {
 	const unsigned long limited = MIN(1000ul * 10ul * 1ul, backoff);
 	if (httpc_is_yield_on(h)) {
 		unsigned long now_ms = 0;
-		if (h->os.time(&h->os, &now_ms) < 0)
+		if (h->os->time(h->os, &now_ms) < 0)
 			return fatal(h, "unable to get time");
 		if ((now_ms - h->current_ms) > limited)
 			return HTTPC_OK;
 		return HTTPC_YIELD;
 	}
 	info(h, "backing off for %lu ms, retried %u", limited, (h->retries));
-	return h->os.sleep(&h->os, limited);
+	return h->os->sleep(h->os, limited);
 }
 
 /* This allows us to be a bit more liberal in what we accept */
@@ -735,7 +735,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 		switch (fld->type) {
 		case FLD_ACCEPT_RANGES:
 			if (httpc_case_insensitive_search(line, "bytes")) {
-				h->accept_ranges = !!(h->os.flags & HTTPC_OPT_HTTP_1_0);
+				h->accept_ranges = !!(h->os->flags & HTTPC_OPT_HTTP_1_0);
 				return info(h, "Accept-Ranges: bytes");
 			}
 			if (httpc_case_insensitive_search(line, "none")) {
@@ -864,6 +864,7 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	if (httpc_string_to_number((const char *)&line[i], &resp, j - i, 10) < 0)
 		return error(h, "invalid response number: %s", line);
 	h->response = resp;
+	h->os->response = resp;
 	while (C_isspace(line[j]))
 		j++;
 	if(j >= length)
@@ -899,11 +900,12 @@ static int httpc_parse_response_header(httpc_t *h, httpc_buffer_t *b0) {
 	h->v1 = 0;
 	h->v2 = 0;
 	h->response = 0;
+	h->os->response = 0;
 	h->length = 0;
 	h->identity = 1;
 	h->length_set = 0;
-	h->keep_alive = !(h->os.flags & HTTPC_OPT_HTTP_1_0);
-	h->accept_ranges = !(h->os.flags & HTTPC_OPT_HTTP_1_0);
+	h->keep_alive = !(h->os->flags & HTTPC_OPT_HTTP_1_0);
+	h->accept_ranges = !(h->os->flags & HTTPC_OPT_HTTP_1_0);
 	b0->used = 0;
 
 	length = b0->allocated;
@@ -1140,11 +1142,12 @@ next_state:
 		next        = SM_OPEN;
 		h->open     = 0;
 		h->progress = 0;
-		if (h->os.flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING | HTTPC_OPT_REUSE)) {
-			h->status = fatal(h, "unknown option provided %u", h->os.flags);
+		h->os->response = 0;
+		if (h->os->flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING | HTTPC_OPT_REUSE)) {
+			h->status = fatal(h, "unknown option provided %u", h->os->flags);
 			next      = SM_DONE;
 		}
-		if (h->os.time(&h->os, &h->start_ms) < 0) {
+		if (h->os->time(h->os, &h->start_ms) < 0) {
 			h->status = fatal(h, "unable to get time");
 			next      = SM_DONE;
 		}
@@ -1166,7 +1169,7 @@ next_state:
 		implies(h->open, h->keep_alive);
 		if (h->open) /* reuse connection */
 			break;
-		const int y = h->os.open(&h->os, &h->socket, h->os.socketopts, h->domain, h->port, h->use_ssl);
+		const int y = h->os->open(h->os, &h->socket, h->os->socketopts, h->domain, h->port, h->use_ssl);
 		if (y == HTTPC_OK)
 			h->open = 1;
 		else if (y == HTTPC_YIELD)
@@ -1231,7 +1234,7 @@ next_state:
 		break;
 	case SM_REDR:
 		next = SM_OPEN;
-		if (h->os.close(&h->os, h->socket) == HTTPC_YIELD) {
+		if (h->os->close(h->os, h->socket) == HTTPC_YIELD) {
 			next = SM_REDR;
 		} else { /* do not care about errors -- only yield */
 			h->open = 0;
@@ -1241,7 +1244,7 @@ next_state:
 	case SM_BCKO:
 		next = SM_SLEP;
 		if (h->open) {
-			if (h->os.close(&h->os, h->socket) == HTTPC_YIELD) {
+			if (h->os->close(h->os, h->socket) == HTTPC_YIELD) {
 				next = SM_BCKO;
 				break; /* !! */
 			} else { /* do not care about errors -- only yield */
@@ -1258,7 +1261,7 @@ next_state:
 		h->progress = 0;
 		h->redirect = 0;
 
-		if (h->os.time(&h->os, &h->current_ms) < 0) {
+		if (h->os->time(h->os, &h->current_ms) < 0) {
 			h->status = fatal(h, "unable to get time");
 			next = SM_DONE;
 		}
@@ -1283,7 +1286,7 @@ next_state:
 				h->state = next; /* !! */
 				return HTTPC_REUSE; /* !! */
 			}
-			if (h->os.close(&h->os, h->socket) == HTTPC_YIELD) {
+			if (h->os->close(h->os, h->socket) == HTTPC_YIELD) {
 				/* stay in the same state */
 				break; /* !! */
 			} else { /* do not care about errors -- only yield */
@@ -1296,14 +1299,14 @@ next_state:
 			h->status = HTTPC_ERROR;
 		if (buffer_free(h, &h->burl) < 0)
 			h->status = HTTPC_ERROR;
-		if (h->os.time(&h->os, &h->end_ms) < 0)
+		if (h->os->time(h->os, &h->end_ms) < 0)
 			h->status = HTTPC_ERROR;
 		debug(h, "took %lu ms", h->end_ms - h->start_ms);
 		const int dead = httpc_is_dead(h);
 		/* must be last */
 		int status = h->status;
-		void *f = h->os.state;
-		h->os.state = NULL;
+		void *f = h->os->state;
+		h->os->state = NULL;
 		if (httpc_free(h, f) < 0)
 			status = HTTPC_ERROR;
 		assert(status != HTTPC_YIELD);
@@ -1340,7 +1343,7 @@ int httpc_end_session(httpc_options_t *a) {
 static int httpc_op_stack(httpc_options_t *a, const char *url, int op, httpc_callback rcv, void *rcv_param, httpc_callback snd, void *snd_param) {
 	if (a->state)
 		return HTTPC_ERROR;
-	httpc_t h = { .os = *a, .rcv = rcv, .rcv_param = rcv_param, .snd = snd, .snd_param = snd_param, };
+	httpc_t h = { .os = a, .rcv = rcv, .rcv_param = rcv_param, .snd = snd, .snd_param = snd_param, };
 	assert(httpc_is_yield_on(&h) == 0);
 	assert(httpc_is_reuse(&h)    == 0);
 	return httpc_state_machine(&h, url, op);
@@ -1356,7 +1359,7 @@ static int httpc_op_heap(httpc_options_t *a, const char *url, int op, httpc_call
 			return HTTPC_ERROR;
 		memset(h, 0, sizeof *h);
 		a->state     = h;
-		h->os        = *a;
+		h->os        = a;
 		h->rcv       = rcv;
 		h->snd       = snd;
 		h->rcv_param = rcv_param;
@@ -1618,7 +1621,7 @@ int httpc_tests(httpc_options_t *a) {
 	a->time  = httpc_testing_time;
 
 	{
-		httpc_t h = { .os = *a, };
+		httpc_t h = { .os = a, };
 		a->socketopts = &h;
 		char buf[128] = { 0, };
 		size_t buflen = sizeof buf;
@@ -1658,7 +1661,7 @@ int httpc_tests(httpc_options_t *a) {
 	};
 	const size_t url_tests_count = sizeof (url_tests) / sizeof (url_tests[0]);
 	for (size_t i = 0; i < url_tests_count; i++) {
-		httpc_t h = { .os = *a, };
+		httpc_t h = { .os = a, };
 		const struct url_test *u = &url_tests[i];
 		info(&h, "URL:       %s", u->url);
 		const int rp = httpc_parse_url(&h, u->url);
@@ -1707,7 +1710,7 @@ int httpc_tests(httpc_options_t *a) {
 	const size_t file_tests_count = sizeof (file_tests) / sizeof (file_tests[0]);
 	for (size_t i = 0; i < file_tests_count; i++) {
 		const struct file_test *ft = &file_tests[i];
-		httpc_t h = { .os = *a, };
+		httpc_t h = { .os = a, };
 		a->socketopts = &h;
 		info(&h, "Test GET on URL '%s'", ft->file);
 		const int code = httpc_get(a, ft->file, NULL, NULL);

@@ -32,7 +32,7 @@ typedef int (*httpc_callback)(void *param, unsigned char *buf, size_t length, si
 struct httpc_options;
 typedef struct httpc_options httpc_options_t;
 
-struct httpc_options {
+struct httpc_options { /* Note that get/put/etcetera functions can *write* to this structure */
 	allocator_fn allocator;
 
 	int (*open)(httpc_options_t *os, void **socket, void *opts, const char *domain, unsigned short port, int use_ssl);
@@ -54,6 +54,7 @@ struct httpc_options {
 	char **argv;      /* custom headers; appended to the HTTP request */
 
 	void *context;    /* For your use, feel free to fill with good thoughts and positive affirmations */
+	int response;     /* HTTP response code; set after the header is retrieved. */
 };
 
 
