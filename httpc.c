@@ -870,13 +870,20 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 		return error(h, "bounds exceeded");
 	char *ok = &line[j];
 	ok[length - 1u] = '\0';
+
 	/* For handling redirections: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Redirections> */
 	if (h->response < 200 || h->response > 399)
 		return error(h, "invalid response number: %u", h->response);
 	if (h->response >= 200 && h->response <= 299) {
-		int is_empty   = ok[0] == '\0' || ok[1] == '\0';
-		int is_ok      = is_empty ? 0 : httpc_case_insensitive_compare(ok, "OK", 2) == 0;
-		int is_partial = is_ok    ? 0 : httpc_case_insensitive_compare(ok, "Partial Content", 15) == 0;
+		char okay[] = "Ok";
+		char partial[] = "Partial Content"; /* N.B. We should check for end of string here (which can include white-space) */
+		const size_t ok_length = length - j;
+		const size_t okay_length = sizeof (okay) - 1;
+		const size_t partial_length = sizeof (partial) - 1;
+		assert(ok_length <= length);
+		const int is_empty   = ok[0] == '\0' || ok[1] == '\0';
+		const int is_ok      = is_empty ? 0 : ok_length >= okay_length && httpc_case_insensitive_compare(ok, okay, okay_length) == 0;
+		const int is_partial = is_ok    ? 0 : ok_length >= partial_length && httpc_case_insensitive_compare(ok, partial, partial_length) == 0;
 		if (is_empty || (!is_ok && !is_partial))
 			return error(h, "unexpected HTTP response: %s", ok);
 	}
