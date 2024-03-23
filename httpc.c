@@ -770,7 +770,6 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			if (httpc_scan_number(&line[fld->length], &h->length, 10) < 0)
 				return error(h, "invalid content length: %s", line);
 			h->length_set = 1;
-			h->os->content_length = h->length;
 			return info(h, "Content Length: %lu", (unsigned long)h->length);
 		case FLD_REDIRECT:
 			if (h->os->response >= 300 && h->os->response < 399) {
