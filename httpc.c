@@ -92,7 +92,7 @@ struct httpc {
 		 redirects; /* number of times to redirected */
 	unsigned retries_max,  /* maximum number of times to retry */
 		 redirects_max; /* maximum number of times to redirect */
-	unsigned response, v1, v2; /* HTTP response, HTTP version (1.0 or 1.1) */
+	unsigned v1, v2; /* HTTP version (1.0 or 1.1) */
 	unsigned use_ssl       :1, /* if set then SSL should be used on the connection */
 		 fatal         :1, /* if set then something has gone fatally wrong */
 		 accept_ranges :1, /* if set then the server accepts ranges */
@@ -770,9 +770,10 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			if (httpc_scan_number(&line[fld->length], &h->length, 10) < 0)
 				return error(h, "invalid content length: %s", line);
 			h->length_set = 1;
+			h->os->content_length = h->length;
 			return info(h, "Content Length: %lu", (unsigned long)h->length);
 		case FLD_REDIRECT:
-			if (h->response >= 300 && h->response < 399) {
+			if (h->os->response >= 300 && h->os->response < 399) {
 				if (h->redirects++ > h->redirects_max)
 					return error(h, "redirect count exceed max (%u)", (unsigned)h->redirects_max);
 				size_t k = 0, j = 0;
@@ -863,7 +864,6 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	httpc_length_t resp = 0;
 	if (httpc_string_to_number((const char *)&line[i], &resp, j - i, 10) < 0)
 		return error(h, "invalid response number: %s", line);
-	h->response = resp;
 	h->os->response = resp;
 	while (C_isspace(line[j]))
 		j++;
@@ -873,9 +873,9 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	ok[length - 1u] = '\0';
 
 	/* For handling redirections: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Redirections> */
-	if (h->response < 200 || h->response > 399)
-		return error(h, "invalid response number: %u", h->response);
-	if (h->response >= 200 && h->response <= 299) {
+	if (h->os->response < 200 || h->os->response > 399)
+		return error(h, "invalid response number: %u", h->os->response);
+	if (h->os->response >= 200 && h->os->response <= 299) {
 		char okay[] = "Ok";
 		char partial[] = "Partial Content"; /* N.B. We should check for end of string here (which can include white-space) */
 		const size_t ok_length = length - j;
@@ -899,7 +899,6 @@ static int httpc_parse_response_header(httpc_t *h, httpc_buffer_t *b0) {
 	size_t length = 0, hlen = 0;
 	h->v1 = 0;
 	h->v2 = 0;
-	h->response = 0;
 	h->os->response = 0;
 	h->length = 0;
 	h->identity = 1;
@@ -1202,13 +1201,13 @@ next_state:
 		if (y < 0) {
 			next = SM_BCKO;
 			if (op == HTTPC_PUT || op == HTTPC_POST || op == HTTPC_DELETE) {
-				if (h->response) {
+				if (h->os->response) {
 					error(h, "request failed");
-					h->status = -(int)(h->response);
+					h->status = -(int)(h->os->response);
 				}
 			}
-			if (h->response >= 400 && h->response <= 499) {
-				h->status = -(int)(h->response);
+			if (h->os->response >= 400 && h->os->response <= 499) {
+				h->status = -(int)(h->os->response);
 				next      = SM_DONE;
 			}
 		} else if (y == HTTPC_YIELD) {
