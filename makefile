@@ -1,4 +1,4 @@
-HTTPC_VERSION=4.1.1
+HTTPC_VERSION=4.1.2
 STD=c99
 CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="\"${HTTPC_VERSION}\""
 TARGET=httpc

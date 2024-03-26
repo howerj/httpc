@@ -44,12 +44,17 @@
 #define HTTPC_MAX_HEADER (8192ul)
 #endif
 
+#ifndef HTTPC_ALLOW_ANY_RESPONSE_STRING /* Allow any response string, e.g. instead of requiring "200 ok", "200 beep boop" would be fine */
+#define HTTPC_ALLOW_ANY_RESPONSE_STRING (0)
+#endif
+
 #define USED(X)                 ((void)(X)) /* warning suppression: variable is used conditionally */
 #define UNUSED(X)               ((void)(X)) /* warning suppression: variable is unused in function */
 #define MAX(X, Y)               ((X) > (Y) ? (X) : (Y))
 #define MIN(X, Y)               ((X) < (Y) ? (X) : (Y))
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 #define implies(P, Q)           assert(!(P) || (Q))
+#define NELEMS(X)               ((sizeof(X) / sizeof((X)[0])))
 
 typedef struct {
 	unsigned char stack[HTTPC_STACK_BUFFER_SIZE]; /* small temporary buffer */
@@ -61,6 +66,11 @@ typedef struct {
 	char *buffer;
 	size_t length, used;
 } httpc_buffer_cb_t; /* used in PUT/POST/GET to memory functions */
+
+typedef struct {
+	int code;
+	const char *value;
+} httpc_response_string_t;
 
 typedef unsigned long httpc_length_t;
 
@@ -159,10 +169,12 @@ static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const 
 static int httpc_log_fmt(httpc_t *h, const char *fmt, ...) {
 	assert(fmt);
 	assert(h);
-	assert(h->os->logger);
+	assert(h->os);
+	httpc_options_t *os = h->os;
+	assert(os->logger);
 	va_list ap;
 	va_start(ap, fmt);
-	const int r = h->os->logger(h->os, h->os->logfile, fmt, ap);
+	const int r = os->logger(os, os->logfile, fmt, ap);
 	va_end(ap);
 	if (r < 0)
 		(void)httpc_kill(h);
@@ -172,14 +184,15 @@ static int httpc_log_fmt(httpc_t *h, const char *fmt, ...) {
 static int httpc_log_line(httpc_t *h, const char *type, int die, int ret, const unsigned line, const char *fmt, ...) {
 	assert(h);
 	assert(fmt);
-	if (h->os->flags & HTTPC_OPT_LOGGING_ON) {
-		assert(h->os->logger);
+	httpc_options_t *os = h->os;
+	if (os->flags & HTTPC_OPT_LOGGING_ON) {
+		assert(os->logger);
 		assert(type);
 		if (httpc_log_fmt(h, "%s:%u ", type, line) < 0)
 			return HTTPC_ERROR;
 		va_list ap;
 		va_start(ap, fmt);
-		if (h->os->logger(h->os, h->os->logfile, fmt, ap) < 0)
+		if (os->logger(os, os->logfile, fmt, ap) < 0)
 			(void)httpc_kill(h);
 		va_end(ap);
 		if (httpc_log_fmt(h, "\n") < 0)
@@ -835,10 +848,21 @@ static int httpc_read_until_line_end(httpc_t *h, httpc_buffer_t *b, size_t *leng
 	return fatal(h, "buffer too small");
 }
 
+/* N.B. We should check for end of string here (which can include white-space) */
+static int httpc_response_string_matches(const httpc_response_string_t *m, const char *string) {
+	assert(m);
+	assert(string);
+	const size_t elen = strlen(m->value), slen = strlen(string);
+	if (slen < elen)
+		return 0;
+	return 0 == httpc_case_insensitive_compare(m->value, string, slen);
+}
+
 static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const size_t length) {
 	assert(h);
 	const char v1_0[] = "HTTP/1.0 ", v1_1[] = "HTTP/1.1 ";
 	size_t i = 0, j = 0;
+	httpc_options_t *os = h->os;
 	assert(length >= 1);
 
 	if (length < sizeof (v1_0) && length < sizeof (v1_1))
@@ -863,7 +887,7 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	httpc_length_t resp = 0;
 	if (httpc_string_to_number((const char *)&line[i], &resp, j - i, 10) < 0)
 		return error(h, "invalid response number: %s", line);
-	h->os->response = resp;
+	os->response = resp;
 	while (C_isspace(line[j]))
 		j++;
 	if(j >= length)
@@ -872,19 +896,31 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	ok[length - 1u] = '\0';
 
 	/* For handling redirections: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Redirections> */
-	if (h->os->response < 200 || h->os->response > 399)
-		return error(h, "invalid response number: %u", h->os->response);
-	if (h->os->response >= 200 && h->os->response <= 299) {
-		char okay[] = "Ok";
-		char partial[] = "Partial Content"; /* N.B. We should check for end of string here (which can include white-space) */
-		const size_t ok_length = length - j;
-		const size_t okay_length = sizeof (okay) - 1;
-		const size_t partial_length = sizeof (partial) - 1;
-		assert(ok_length <= length);
-		const int is_empty   = ok[0] == '\0' || ok[1] == '\0';
-		const int is_ok      = is_empty ? 0 : ok_length >= okay_length && httpc_case_insensitive_compare(ok, okay, okay_length) == 0;
-		const int is_partial = is_ok    ? 0 : ok_length >= partial_length && httpc_case_insensitive_compare(ok, partial, partial_length) == 0;
-		if (is_empty || (!is_ok && !is_partial))
+	if (os->response < 200 || os->response > 399)
+		return error(h, "invalid response number: %u", os->response);
+	if (os->response >= 200 && os->response <= 299) {
+		if (HTTPC_ALLOW_ANY_RESPONSE_STRING)
+			return HTTPC_OK;
+		static const httpc_response_string_t resps[] = {
+			{ 200, "OK", }, /* Default response, always allowed */
+			{ 201, "Created", },
+			{ 202, "Accepted", },
+			{ 206, "Partial Content", },
+			{ 218, "This is fine", },
+		};
+		int found = 0;
+		for (size_t i = 0; i < NELEMS(resps); i++) {
+			const httpc_response_string_t *m = &resps[i];
+			if (httpc_response_string_matches(m, ok) && m->code == os->response) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found) {
+			httpc_response_string_t okay = { os->response, "OK", };
+			found = httpc_response_string_matches(&okay, ok);
+		}
+		if (!found)
 			return error(h, "unexpected HTTP response: %s", ok);
 	}
 	return HTTPC_OK;
@@ -896,14 +932,15 @@ static int httpc_parse_response_header(httpc_t *h, httpc_buffer_t *b0) {
 	if (httpc_is_dead(h))
 		return HTTPC_ERROR;
 	size_t length = 0, hlen = 0;
+	httpc_options_t *os = h->os;
 	h->v1 = 0;
 	h->v2 = 0;
-	h->os->response = 0;
+	os->response = 0;
 	h->length = 0;
 	h->identity = 1;
 	h->length_set = 0;
-	h->keep_alive = !(h->os->flags & HTTPC_OPT_HTTP_1_0);
-	h->accept_ranges = !(h->os->flags & HTTPC_OPT_HTTP_1_0);
+	h->keep_alive = !(os->flags & HTTPC_OPT_HTTP_1_0);
+	h->accept_ranges = !(os->flags & HTTPC_OPT_HTTP_1_0);
 	b0->used = 0;
 
 	length = b0->allocated;
@@ -1132,6 +1169,7 @@ static int httpc_state_machine(httpc_t *h, const char *url, int op) {
 	assert(h);
 	assert(url);
 	int next = SM_DONE;
+	httpc_options_t *os = h->os;
 next_state:
 	if (httpc_is_dead(h))
 		h->state = SM_DONE;
@@ -1140,12 +1178,12 @@ next_state:
 		next        = SM_OPEN;
 		h->open     = 0;
 		h->progress = 0;
-		h->os->response = 0;
-		if (h->os->flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING | HTTPC_OPT_REUSE)) {
-			h->status = fatal(h, "unknown option provided %u", h->os->flags);
+		os->response = 0;
+		if (os->flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING | HTTPC_OPT_REUSE)) {
+			h->status = fatal(h, "unknown option provided %u", os->flags);
 			next      = SM_DONE;
 		}
-		if (h->os->time(h->os, &h->start_ms) < 0) {
+		if (os->time(os, &h->start_ms) < 0) {
 			h->status = fatal(h, "unable to get time");
 			next      = SM_DONE;
 		}
@@ -1167,7 +1205,7 @@ next_state:
 		implies(h->open, h->keep_alive);
 		if (h->open) /* reuse connection */
 			break;
-		const int y = h->os->open(h->os, &h->socket, h->os->socketopts, h->domain, h->port, h->use_ssl);
+		const int y = os->open(os, &h->socket, os->socketopts, h->domain, h->port, h->use_ssl);
 		if (y == HTTPC_OK)
 			h->open = 1;
 		else if (y == HTTPC_YIELD)
@@ -1200,13 +1238,13 @@ next_state:
 		if (y < 0) {
 			next = SM_BCKO;
 			if (op == HTTPC_PUT || op == HTTPC_POST || op == HTTPC_DELETE) {
-				if (h->os->response) {
+				if (os->response) {
 					error(h, "request failed");
-					h->status = -(int)(h->os->response);
+					h->status = -(int)(os->response);
 				}
 			}
-			if (h->os->response >= 400 && h->os->response <= 499) {
-				h->status = -(int)(h->os->response);
+			if (os->response >= 400 && os->response <= 499) {
+				h->status = -(int)(os->response);
 				next      = SM_DONE;
 			}
 		} else if (y == HTTPC_YIELD) {
@@ -1232,7 +1270,7 @@ next_state:
 		break;
 	case SM_REDR:
 		next = SM_OPEN;
-		if (h->os->close(h->os, h->socket) == HTTPC_YIELD) {
+		if (os->close(os, h->socket) == HTTPC_YIELD) {
 			next = SM_REDR;
 		} else { /* do not care about errors -- only yield */
 			h->open = 0;
@@ -1242,7 +1280,7 @@ next_state:
 	case SM_BCKO:
 		next = SM_SLEP;
 		if (h->open) {
-			if (h->os->close(h->os, h->socket) == HTTPC_YIELD) {
+			if (os->close(os, h->socket) == HTTPC_YIELD) {
 				next = SM_BCKO;
 				break; /* !! */
 			} else { /* do not care about errors -- only yield */
@@ -1259,7 +1297,7 @@ next_state:
 		h->progress = 0;
 		h->redirect = 0;
 
-		if (h->os->time(h->os, &h->current_ms) < 0) {
+		if (os->time(os, &h->current_ms) < 0) {
 			h->status = fatal(h, "unable to get time");
 			next = SM_DONE;
 		}
@@ -1284,7 +1322,7 @@ next_state:
 				h->state = next; /* !! */
 				return HTTPC_REUSE; /* !! */
 			}
-			if (h->os->close(h->os, h->socket) == HTTPC_YIELD) {
+			if (os->close(os, h->socket) == HTTPC_YIELD) {
 				/* stay in the same state */
 				break; /* !! */
 			} else { /* do not care about errors -- only yield */
@@ -1297,14 +1335,14 @@ next_state:
 			h->status = HTTPC_ERROR;
 		if (buffer_free(h, &h->burl) < 0)
 			h->status = HTTPC_ERROR;
-		if (h->os->time(h->os, &h->end_ms) < 0)
+		if (os->time(os, &h->end_ms) < 0)
 			h->status = HTTPC_ERROR;
 		debug(h, "took %lu ms", h->end_ms - h->start_ms);
 		const int dead = httpc_is_dead(h);
 		/* must be last */
 		int status = h->status;
-		void *f = h->os->state;
-		h->os->state = NULL;
+		void *f = os->state;
+		os->state = NULL;
 		if (httpc_free(h, f) < 0)
 			status = HTTPC_ERROR;
 		assert(status != HTTPC_YIELD);
