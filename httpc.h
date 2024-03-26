@@ -55,6 +55,7 @@ struct httpc_options { /* Note that get/put/etcetera functions can *write* to th
 
 	void *context;    /* For your use, feel free to fill with good thoughts and positive affirmations */
 	int response;     /* HTTP response code; set after the header is retrieved. */
+	int content_length;
 };
 
 
