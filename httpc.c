@@ -594,16 +594,21 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 			goto fail;
 	}
 	if (op == HTTPC_PUT || op == HTTPC_POST) {
-		if (h->length_set) {
-			char content[64 + 1] = { 0, };
-			if (httpc_buffer_add_string(h, b0, "Content-Length: ") < 0)
-				goto fail;
-			httpc_num_to_str(content, h->length, 10);
-			if (httpc_buffer_add_string(h, b0, content) < 0)
-				goto fail;
-			if (httpc_buffer_add_string(h, b0, "\r\n") < 0)
-				goto fail;
-		} else { /* Attempt to send chunked encoding */
+		const char* content_len = "Content-Length:";
+		for (int i = 0; i < h->os->argc; i++) {
+			const char *line = h->os->argv[i];
+			if (strncmp(line, content_len, strlen(content_len)) == 0){
+				for (size_t j = 0; j < strlen(line); j++){
+					if (line[j] >= '0' && line [j] <= '9'){
+						if (httpc_string_to_number((line + j), &h->length, b0->allocated, 10) >= 0)
+							h->length_set = 1;
+						break;
+					}
+				}
+				break;
+			}
+		}
+		if (h->length_set == 0) {
 			if (httpc_buffer_add_string(h, b0, "Transfer-Encoding: chunked\r\n") < 0)
 				goto fail;
 		}
