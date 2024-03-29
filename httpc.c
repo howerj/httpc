@@ -1394,20 +1394,17 @@ static int httpc_op_heap(httpc_options_t *a, const char *url, int op, httpc_call
 		h = a->allocator(a->arena, NULL, 0, sizeof *h);
 		if (!h)
 			return HTTPC_ERROR;
-		memset(h, 0, sizeof *h);
-		a->state     = h;
 	}
 
+	void *socket = h->socket;
+	memset(h, 0, sizeof *h);
+	a->state     = h;
 	h->os        = a;
 	h->rcv       = rcv;
 	h->snd       = snd;
 	h->rcv_param = rcv_param;
 	h->snd_param = snd_param;
-	h->position = 0;
-	h->length = 0;
-	h->max = 0;
-	h->length_set = 0;
-	h->state = SM_INIT;
+	h->socket    = socket;
 	const int r = httpc_state_machine(h, url, op);
 	if (r != HTTPC_YIELD && r != HTTPC_REUSE)
 		a->state = NULL; /* make sure this is not reused */
