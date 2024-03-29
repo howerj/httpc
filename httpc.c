@@ -120,7 +120,7 @@ static inline void httpc_reverse_string(char * const r, const size_t length) {
 	for (size_t i = 0; i < length / 2ul; i++) {
 		const size_t t = r[i];
 		r[i] = r[last - i];
-		r[last - i] = (char)t;
+		r[last - i] = t;
 	}
 }
 
@@ -362,7 +362,7 @@ static int httpc_buffer_add_base64(httpc_t *h, httpc_buffer_t *out, const unsign
 	assert(in);
 	assert(out);
 	/* assert(shake_it_all_about); */
-	const size_t encoded_length  = (size_t)(4ull * ((input_length + 2ull) / 3ull));
+	const size_t encoded_length  = 4ull * ((input_length + 2ull) / 3ull);
 	const size_t needs = 1u + encoded_length + out->used;
 	assert(needs > encoded_length);
 	assert(encoded_length > input_length);
@@ -390,7 +390,7 @@ static int httpc_buffer_add_base64(httpc_t *h, httpc_buffer_t *out, const unsign
 	}
 	static const int mod_table[] = { 0, 2, 1, };
 	for (int i = 0; i < mod_table[input_length % 3]; i++)
-		out->buffer[j - 1u - (size_t)i] = '=';
+		out->buffer[j - 1u - i] = '=';
 	assert(j < out->allocated);
 	out->buffer[j] = '\0';
 	out->used = j;
@@ -494,7 +494,7 @@ static int httpc_parse_url(httpc_t *h, const char *url) {
 	char *usr = memchr(&u[i], '@', l - i);
 	if (usr) {
 		h->userpass = &u[i];
-		i = (size_t)(usr - u) + 1ul;
+		i = (usr - u) + 1ul;
 		*usr = '\0';
 		if (!strchr(h->userpass, ':')) {
 			error(h, "user-pass contains no ':': %s", h->userpass);
@@ -524,7 +524,7 @@ static int httpc_parse_url(httpc_t *h, const char *url) {
 			error(h, "invalid port number");
 			goto fail;
 		}
-		h->port = (unsigned short)port;
+		h->port = port;
 		j = i - 1;
 	}
 
@@ -555,6 +555,31 @@ static const char *httpc_op_to_str(int op) {
 	case HTTPC_TRACE:   return "TRACE ";
 	case HTTPC_OPTIONS: return "OPTIONS ";
 	}
+	return NULL;
+}
+
+/* This allows us to be a bit more liberal in what we accept */
+static inline int httpc_case_insensitive_compare(const char *a, const char *b, const size_t length) {
+	assert(a);
+	assert(b);
+	assert(length < SIZE_MAX);
+	for (size_t i = 0; i < length ; i++) {
+		const int ach = C_tolower(a[i]);
+		const int bch = C_tolower(b[i]);
+		const int diff = ach - bch;
+		if (!ach || diff)
+			return diff;
+	}
+	return 0;
+}
+
+static const char *httpc_case_insensitive_search(const char *haystack, const char *needle) {
+	assert(haystack);
+	assert(needle);
+	const size_t needle_length = strlen(needle);
+	for (; *haystack; haystack++)
+		if (0 == httpc_case_insensitive_compare(haystack, needle, needle_length))
+			return haystack;
 	return NULL;
 }
 
@@ -594,16 +619,13 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 			goto fail;
 	}
 	if (op == HTTPC_PUT || op == HTTPC_POST) {
-		const char* content_len = "Content-Length:";
+		const char field[] = "Content-Length:";
+		size_t field_len= sizeof(field) - 1;
 		for (int i = 0; i < h->os->argc; i++) {
 			const char *line = h->os->argv[i];
-			if (strncmp(line, content_len, strlen(content_len)) == 0){
-				for (size_t j = 0; j < strlen(line); j++){
-					if (line[j] >= '0' && line [j] <= '9'){
-						if (httpc_string_to_number((line + j), &h->length, b0->allocated, 10) >= 0)
-							h->length_set = 1;
-						break;
-					}
+			if (httpc_case_insensitive_compare(field, line, field_len) == 0){
+				if (httpc_scan_number(&line[field_len], &h->length, 10) == 0){
+					h->length_set = 1;
 				}
 				break;
 			}
@@ -680,31 +702,6 @@ static int httpc_backoff(httpc_t *h) {
 	}
 	info(h, "backing off for %lu ms, retried %u", limited, (h->retries));
 	return h->os->sleep(h->os, limited);
-}
-
-/* This allows us to be a bit more liberal in what we accept */
-static inline int httpc_case_insensitive_compare(const char *a, const char *b, const size_t length) {
-	assert(a);
-	assert(b);
-	assert(length < SIZE_MAX);
-	for (size_t i = 0; i < length ; i++) {
-		const int ach = C_tolower(a[i]);
-		const int bch = C_tolower(b[i]);
-		const int diff = ach - bch;
-		if (!ach || diff)
-			return diff;
-	}
-	return 0;
-}
-
-static const char *httpc_case_insensitive_search(const char *haystack, const char *needle) {
-	assert(haystack);
-	assert(needle);
-	const size_t needle_length = strlen(needle);
-	for (; *haystack; haystack++)
-		if (0 == httpc_case_insensitive_compare(haystack, needle, needle_length))
-			return haystack;
-	return NULL;
 }
 
 /* NB. We could add in a callback to handle unknown fields, however we would
@@ -840,7 +837,7 @@ static int httpc_read_until_line_end(httpc_t *h, httpc_buffer_t *b, size_t *leng
 			return HTTPC_OK;
 		}
 		assert(i < olength);
-		b->buffer[i] = (char)ch;
+		b->buffer[i] = ch;
 		if ((i + 1ul) >= (olength - 1ul)) {
 			const size_t newsz = olength * 2ul;
 			if (newsz < olength) /* overflow */
@@ -892,7 +889,7 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 	httpc_length_t resp = 0;
 	if (httpc_string_to_number((const char *)&line[i], &resp, j - i, 10) < 0)
 		return error(h, "invalid response number: %s", line);
-	os->response = (int)resp;
+	os->response = resp;
 	while (C_isspace(line[j]))
 		j++;
 	if(j >= length)
@@ -1100,11 +1097,11 @@ static int httpc_generate_request_body(httpc_t *h, httpc_buffer_t *b0) {
 			r = error(h, "snd overflow");
 			break;
 		}
-		pos += (size_t)r;
+		pos += r;
 		if (chunky) {
 			char n[64 + 1] = { 0, };
 			assert(r < INT_MAX);
-			const unsigned l = httpc_num_to_str(n, (unsigned long)r, 16);
+			const unsigned l = httpc_num_to_str(n, r, 16);
 			assert((l + 2) <= sizeof (n));
 			memcpy(&n[l], "\r\n", 3);
 			if (httpc_network_write(h, (unsigned char*)n, l + 2) < 0) {
@@ -1113,7 +1110,7 @@ static int httpc_generate_request_body(httpc_t *h, httpc_buffer_t *b0) {
 			}
 		}
 
-		if (httpc_network_write(h, b0->buffer, (size_t)r) < 0) {
+		if (httpc_network_write(h, b0->buffer, r) < 0) {
 			r = error(h, "write failed");
 			break;
 		}
@@ -1184,7 +1181,7 @@ next_state:
 		h->open     = 0;
 		h->progress = 0;
 		os->response = 0;
-		if (os->flags & (unsigned)(~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING | HTTPC_OPT_REUSE))) {
+		if (os->flags & ~(HTTPC_OPT_LOGGING_ON | HTTPC_OPT_HTTP_1_0 | HTTPC_OPT_NON_BLOCKING | HTTPC_OPT_REUSE)) {
 			h->status = fatal(h, "unknown option provided %u", os->flags);
 			next      = SM_DONE;
 		}
@@ -1486,7 +1483,7 @@ static int httpc_put_buffer_cb(void *param, unsigned char *buf, size_t length, s
 	const size_t copy = MIN(length, b->used - position);
 	memcpy(buf, &b->buffer[position], copy);
 	assert(copy < INT_MAX);
-	return (int)copy;
+	return copy;
 }
 
 static inline int httpc_buffer_unsupported(httpc_options_t *a) {
