@@ -558,6 +558,31 @@ static const char *httpc_op_to_str(int op) {
 	return NULL;
 }
 
+/* This allows us to be a bit more liberal in what we accept */
+static inline int httpc_case_insensitive_compare(const char *a, const char *b, const size_t length) {
+	assert(a);
+	assert(b);
+	assert(length < SIZE_MAX);
+	for (size_t i = 0; i < length ; i++) {
+		const int ach = C_tolower(a[i]);
+		const int bch = C_tolower(b[i]);
+		const int diff = ach - bch;
+		if (!ach || diff)
+			return diff;
+	}
+	return 0;
+}
+
+static const char *httpc_case_insensitive_search(const char *haystack, const char *needle) {
+	assert(haystack);
+	assert(needle);
+	const size_t needle_length = strlen(needle);
+	for (; *haystack; haystack++)
+		if (0 == httpc_case_insensitive_compare(haystack, needle, needle_length))
+			return haystack;
+	return NULL;
+}
+
 static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 	assert(h);
 	assert(b0);
@@ -594,16 +619,18 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 			goto fail;
 	}
 	if (op == HTTPC_PUT || op == HTTPC_POST) {
-		if (h->length_set) {
-			char content[64 + 1] = { 0, };
-			if (httpc_buffer_add_string(h, b0, "Content-Length: ") < 0)
-				goto fail;
-			httpc_num_to_str(content, h->length, 10);
-			if (httpc_buffer_add_string(h, b0, content) < 0)
-				goto fail;
-			if (httpc_buffer_add_string(h, b0, "\r\n") < 0)
-				goto fail;
-		} else { /* Attempt to send chunked encoding */
+		const char field[] = "Content-Length:";
+		size_t field_len= sizeof(field) - 1;
+		for (int i = 0; i < h->os->argc; i++) {
+			const char *line = h->os->argv[i];
+			if (httpc_case_insensitive_compare(field, line, field_len) == 0){
+				if (httpc_scan_number(&line[field_len], &h->length, 10) == 0){
+					h->length_set = 1;
+				}
+				break;
+			}
+		}
+		if (h->length_set == 0) {
 			if (httpc_buffer_add_string(h, b0, "Transfer-Encoding: chunked\r\n") < 0)
 				goto fail;
 		}
@@ -675,31 +702,6 @@ static int httpc_backoff(httpc_t *h) {
 	}
 	info(h, "backing off for %lu ms, retried %u", limited, (h->retries));
 	return h->os->sleep(h->os, limited);
-}
-
-/* This allows us to be a bit more liberal in what we accept */
-static inline int httpc_case_insensitive_compare(const char *a, const char *b, const size_t length) {
-	assert(a);
-	assert(b);
-	assert(length < SIZE_MAX);
-	for (size_t i = 0; i < length ; i++) {
-		const int ach = C_tolower(a[i]);
-		const int bch = C_tolower(b[i]);
-		const int diff = ach - bch;
-		if (!ach || diff)
-			return diff;
-	}
-	return 0;
-}
-
-static const char *httpc_case_insensitive_search(const char *haystack, const char *needle) {
-	assert(haystack);
-	assert(needle);
-	const size_t needle_length = strlen(needle);
-	for (; *haystack; haystack++)
-		if (0 == httpc_case_insensitive_compare(haystack, needle, needle_length))
-			return haystack;
-	return NULL;
 }
 
 /* NB. We could add in a callback to handle unknown fields, however we would
