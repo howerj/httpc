@@ -1394,17 +1394,24 @@ static int httpc_op_heap(httpc_options_t *a, const char *url, int op, httpc_call
 		h = a->allocator(a->arena, NULL, 0, sizeof *h);
 		if (!h)
 			return HTTPC_ERROR;
+		memset(h, 0, sizeof *h);
+		a->state     = h;
+	}
+	else if(!httpc_is_yield_on(h)) {
+		/* Clear states when re-using non-yielding sockets */
+		h->position   = 0;
+		h->max        = 0;
+		h->status     = 0;
 	}
 
-	void *socket = h->socket;
-	memset(h, 0, sizeof *h);
-	a->state     = h;
+	/* Reassign callbacks to ensure they are set if the caller does two
+	 * subsequent requests with different callbacks (HEAD vs GET). */
 	h->os        = a;
 	h->rcv       = rcv;
 	h->snd       = snd;
 	h->rcv_param = rcv_param;
 	h->snd_param = snd_param;
-	h->socket    = socket;
+
 	const int r = httpc_state_machine(h, url, op);
 	if (r != HTTPC_YIELD && r != HTTPC_REUSE)
 		a->state = NULL; /* make sure this is not reused */
