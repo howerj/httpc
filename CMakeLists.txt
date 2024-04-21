@@ -6,8 +6,6 @@ project(httpc
 
 option(HTTPC_USE_SSL "SSL support" OFF)
 
-
-
 if(WIN32)
     set(HTTPC_PLATFORM_SRCS
         win.c)
@@ -42,7 +40,10 @@ set(HTTPC_LIB_SRCS
 
 add_library(httpc_lib STATIC ${HTTPC_LIB_SRCS})
 target_link_libraries(httpc_lib PRIVATE httpc_platform)
-target_compile_definitions(httpc_lib PUBLIC HTTPC_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(httpc_lib
+    PUBLIC
+    HTTPC_VERSION="${PROJECT_VERSION}"
+)
 set_property(TARGET httpc_lib PROPERTY C_STANDARD 99)
 set_property(TARGET httpc_lib PROPERTY C_STANDARD_REQUIRED ON)
 set_property(TARGET httpc_lib PROPERTY C_EXTENSIONS OFF)
@@ -53,6 +54,6 @@ set(HTTPC_MAIN_SRCS
 
 add_executable(httpc ${HTTPC_MAIN_SRCS})
 target_link_libraries(httpc PRIVATE httpc_lib)
-set_property(TARGET httpc_lib PROPERTY C_STANDARD 99)
-set_property(TARGET httpc_lib PROPERTY C_STANDARD_REQUIRED ON)
-set_property(TARGET httpc_lib PROPERTY C_EXTENSIONS OFF)
+set_property(TARGET httpc PROPERTY C_STANDARD 99)
+set_property(TARGET httpc PROPERTY C_STANDARD_REQUIRED ON)
+set_property(TARGET httpc PROPERTY C_EXTENSIONS OFF)
