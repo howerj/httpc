@@ -13,3 +13,4 @@ get
 httpc
 install/*
 put
+CMakeLists.txt.user
