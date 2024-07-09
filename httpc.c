@@ -90,9 +90,9 @@ struct httpc {
 	     *url;  /* full URL to be parsed */
 	unsigned short port; /* port to talk on, parsed out at the same time as domain, userpass, path and URL. */
 	void *socket; /* socket used to talk to the server (might actually be an SSL/TLS handle). */
-	httpc_length_t position, /* */
-			length,  /* */
-			max;     /* */
+	httpc_length_t position, /* file position */
+			length,  /* length of file, if known */
+			max;     /* maximum read in */
 	int state,  /* HTTPC contains a state-machine, the state of which is encoded here. */
 	    status; /* HTTP return code status */
 	unsigned long start_ms, /* Start time of operation */
@@ -608,7 +608,7 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 		goto fail;
 	if (httpc_buffer_add_string(h, b0, "\r\n") < 0)
 		goto fail;
-	if (op == HTTPC_GET && h->os->flags & HTTPC_OPT_HTTP_1_0 && h->position && h->accept_ranges) {
+	if (op == HTTPC_GET && !(h->os->flags & HTTPC_OPT_HTTP_1_0) && h->position && h->accept_ranges) {
 		char range[64 + 1] = { 0, };
 		if (httpc_buffer_add_string(h, b0, "Range: bytes=") < 0)
 			goto fail;
@@ -657,7 +657,7 @@ static int httpc_request_send_header(httpc_t *h, httpc_buffer_t *b0, int op) {
 			goto fail;
 	}
 
-	/* NB. We could split up the writes by instead calling 'httpc_network_write' instead 
+	/* N.B. We could split up the writes by instead calling 'httpc_network_write' instead 
 	 * of 'httpc_buffer_add_string' if we wanted. It has some advantages. */
 	assert(b0->used > 0u);
 	if (httpc_network_write(h, b0->buffer, b0->used - 1u) < 0)
@@ -704,7 +704,7 @@ static int httpc_backoff(httpc_t *h) {
 	return h->os->sleep(h->os, limited);
 }
 
-/* NB. We could add in a callback to handle unknown fields, however we would
+/* N.B. We could add in a callback to handle unknown fields, however we would
  * need to add infrastructure so an external user could meaningfully interact
  * with the library internals, which would be too invasive. */
 static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
@@ -746,7 +746,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			continue;
 		if (httpc_case_insensitive_compare(fld->name, line, fld->length))
 			continue;
-		/* NB. Using 'httpc_case_insensitive_search' is a little too liberal in our input handling */
+		/* N.B. Using 'httpc_case_insensitive_search' is a little too liberal in our input handling */
 		switch (fld->type) {
 		case FLD_ACCEPT_RANGES:
 			if (httpc_case_insensitive_search(line, "bytes")) {
@@ -1375,7 +1375,7 @@ int httpc_end_session(httpc_options_t *a) {
 	for (;httpc_state_machine(h, "", HTTPC_GET) == HTTPC_YIELD;)
 		;
 	a->state = NULL;
-	return HTTPC_OK;
+	return HTTPC_OK; /* We might want to return `httpc_state_machine` value here */
 }
 
 static int httpc_op_stack(httpc_options_t *a, const char *url, int op, httpc_callback rcv, void *rcv_param, httpc_callback snd, void *snd_param) {
@@ -1443,7 +1443,7 @@ int httpc_head(httpc_options_t *a, const char *url) {
 	return httpc_operation(a, url, HTTPC_HEAD, NULL, NULL, NULL, NULL);
 }
 
-int httpc_delete(httpc_options_t *a, const char *url) { /* NB. A DELETE body is technically allowed... */
+int httpc_delete(httpc_options_t *a, const char *url) { /* N.B. A DELETE body is technically allowed... */
 	assert(a);
 	assert(url);
 	return httpc_operation(a, url, HTTPC_DELETE, NULL, NULL, NULL, NULL);
@@ -1491,7 +1491,7 @@ static inline int httpc_buffer_unsupported(httpc_options_t *a) {
 	return !!(a->flags & HTTPC_OPT_NON_BLOCKING) || !!(a->flags & HTTPC_OPT_REUSE);
 }
 
-/* NB. These could be made to be non-blocking as well, but it is too much effort */
+/* N.B. These could be made to be non-blocking as well, but it is too much effort */
 int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *length) {
 	assert(url);
 	assert(a);
