@@ -750,7 +750,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 		switch (fld->type) {
 		case FLD_ACCEPT_RANGES:
 			if (httpc_case_insensitive_search(line, "bytes")) {
-				h->accept_ranges = !!(h->os->flags & HTTPC_OPT_HTTP_1_0);
+				h->accept_ranges = !(h->os->flags & HTTPC_OPT_HTTP_1_0);
 				return info(h, "Accept-Ranges: bytes");
 			}
 			if (httpc_case_insensitive_search(line, "none")) {
