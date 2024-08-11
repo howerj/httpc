@@ -72,6 +72,7 @@ typedef struct httpc httpc_t;
 HTTPC_API int httpc_get(httpc_options_t *a, const char *url, httpc_callback fn, void *param);
 HTTPC_API int httpc_put(httpc_options_t *a, const char *url, httpc_callback fn, void *param); /* fn should return size, 0 on stop, -1 on failure */
 HTTPC_API int httpc_post(httpc_options_t *a, const char *url, httpc_callback fn, void *param); /* fn should return size, 0 on stop, -1 on failure */
+HTTPC_API int httpc_post_with_response_body(httpc_options_t *a, const char *url, httpc_callback rxfn, void *rxparam, httpc_callback txfn, void *txparam); /* fn should return size, 0 on stop, -1 on failure */
 HTTPC_API int httpc_get_buffer(httpc_options_t *a, const char *url, char *buffer, size_t *length); /* store GET to buffer */
 HTTPC_API int httpc_put_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length); /* PUT from buffer */
 HTTPC_API int httpc_post_buffer(httpc_options_t *a, const char *url, char *buffer, size_t length); /* POST from buffer */

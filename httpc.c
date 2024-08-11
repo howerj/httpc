@@ -1258,7 +1258,7 @@ next_state:
 	}
 	case SM_RCVB:
 		next = SM_DONE;
-		if (op == HTTPC_GET) {
+		if (h->rcv) {
 			const httpc_length_t pos = h->position;
 			h->progress = 0;
 			const int r = httpc_parse_response_body(h);
@@ -1435,6 +1435,12 @@ int httpc_post(httpc_options_t *a, const char *url, httpc_callback fn, void *par
 	assert(a);
 	assert(url);
 	return httpc_operation(a, url, HTTPC_POST, NULL, NULL, fn, param);
+}
+
+int httpc_post_with_response_body(httpc_options_t *a, const char *url, httpc_callback rxfn, void *rxparam, httpc_callback txfn, void *txparam) {
+	assert(a);
+	assert(url);
+	return httpc_operation(a, url, HTTPC_POST, rxfn, rxparam, txfn, txparam);
 }
 
 int httpc_head(httpc_options_t *a, const char *url) {
