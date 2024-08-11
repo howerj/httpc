@@ -907,6 +907,7 @@ static int httpc_parse_response_header_start_line(httpc_t *h, char *line, const 
 			{ 200, "OK", }, /* Default response, always allowed */
 			{ 201, "Created", },
 			{ 202, "Accepted", },
+			{ 204, "No Content", },
 			{ 206, "Partial Content", },
 			{ 218, "This is fine", },
 		};
