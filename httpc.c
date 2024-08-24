@@ -785,6 +785,7 @@ static int httpc_parse_response_field(httpc_t *h, char *line, size_t length) {
 			if (httpc_scan_number(&line[fld->length], &h->length, 10) < 0)
 				return error(h, "invalid content length: %s", line);
 			h->length_set = 1;
+			h->os->content_length = h->length;
 			return info(h, "Content Length: %lu", (unsigned long)h->length);
 		case FLD_REDIRECT:
 			if (h->os->response >= 300 && h->os->response < 399) {
@@ -1398,12 +1399,22 @@ static int httpc_op_heap(httpc_options_t *a, const char *url, int op, httpc_call
 			return HTTPC_ERROR;
 		memset(h, 0, sizeof *h);
 		a->state     = h;
-		h->os        = a;
-		h->rcv       = rcv;
-		h->snd       = snd;
-		h->rcv_param = rcv_param;
-		h->snd_param = snd_param;
 	}
+	else if(!httpc_is_yield_on(h)) {
+		/* Clear states when re-using non-yielding sockets */
+		h->position   = 0;
+		h->max        = 0;
+		h->status     = 0;
+	}
+
+	/* Reassign callbacks to ensure they are set if the caller does two
+	 * subsequent requests with different callbacks (HEAD vs GET). */
+	h->os        = a;
+	h->rcv       = rcv;
+	h->snd       = snd;
+	h->rcv_param = rcv_param;
+	h->snd_param = snd_param;
+
 	const int r = httpc_state_machine(h, url, op);
 	if (r != HTTPC_YIELD && r != HTTPC_REUSE)
 		a->state = NULL; /* make sure this is not reused */
