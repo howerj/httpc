@@ -51,7 +51,7 @@ struct httpc_options { /* Note that get/put/etcetera functions can *write* to th
 	unsigned flags;   /* options for library */
 
 	int argc;         /* custom headers count; number of custom headers */
-	char **argv;      /* custom headers; appended to the HTTP request */
+	const char **argv;      /* custom headers; appended to the HTTP request */
 
 	void *context;    /* For your use, feel free to fill with good thoughts and positive affirmations */
 	int response;     /* HTTP response code; set after the header is retrieved. */
