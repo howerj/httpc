@@ -1,11 +1,11 @@
 HTTPC_VERSION=4.1.2
 STD=c99
-CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="\"${HTTPC_VERSION}\""
+USE_SSL =1
+CFLAGS=-Wall -Wextra -fPIC -std=${STD} -Os -g -pedantic -DUSE_SSL=${USE_SSL} -fwrapv ${DEFINES} ${EXTRA} -DHTTPC_VERSION="\"${HTTPC_VERSION}\""
 TARGET=httpc
 AR      = ar
 ARFLAGS = rcs
 DESTDIR = install
-USE_SSL =1
 
 ifeq ($(OS),Windows_NT)
 EXE=.exe
